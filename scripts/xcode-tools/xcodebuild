@@ -1,3 +1,43 @@
 #!/bin/sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-exec /usr/bin/xcodebuild "$@"
+
+# Public iPadOS artifacts are intentionally unsigned so users can apply their
+# own development certificate. Set NSTRANS_IOS_ALLOW_SIGNING=1 when producing
+# a locally signed development build.
+if [ "${NSTRANS_IOS_ALLOW_SIGNING:-0}" = "1" ]; then
+  exec /usr/bin/xcodebuild "$@"
+fi
+
+archive_path=""
+export_path=""
+is_export=0
+previous=""
+for argument in "$@"; do
+  case "$previous" in
+    -archivePath) archive_path="$argument" ;;
+    -exportPath) export_path="$argument" ;;
+  esac
+  [ "$argument" = "-exportArchive" ] && is_export=1
+  previous="$argument"
+done
+
+# Xcode refuses to export an unsigned archive even though the compiled app is
+# valid input for AltStore, Sideloadly and other user-signing tools. In the
+# unsigned release path, create the standard Payload/*.app IPA container
+# directly and leave signing to the user.
+if [ "$is_export" = "1" ]; then
+  app_path="$archive_path/Products/Applications/NSTrans.app"
+  if [ ! -d "$app_path" ] || [ -z "$export_path" ]; then
+    echo "Unable to package unsigned IPA: archive app or export path is missing." >&2
+    exit 66
+  fi
+
+  package_root="$(mktemp -d "${TMPDIR:-/tmp}/nstrans-ipa.XXXXXX")"
+  trap 'rm -rf "$package_root"' EXIT HUP INT TERM
+  mkdir -p "$package_root/Payload" "$export_path"
+  cp -R "$app_path" "$package_root/Payload/NSTrans.app"
+  /usr/bin/ditto -c -k --sequesterRsrc "$package_root" "$export_path/NSTrans.ipa"
+  exit 0
+fi
+
+exec /usr/bin/xcodebuild "$@" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO

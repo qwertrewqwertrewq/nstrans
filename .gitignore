@@ -1,6 +1,8 @@
 # Logs
 logs
 *.log
+__pycache__/
+*.py[cod]
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -49,6 +51,11 @@ src-tauri/gen/apple/**/xcuserdata/
 *.jks
 *.p12
 *.mobileprovision
+
+# Local camera/OCR test recordings may contain copyrighted game footage
+*.mp4
+*.mov
+*.mkv
 
 # Editor directories and files
 .vscode/*

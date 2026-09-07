@@ -9,7 +9,7 @@
 | macOS | Apple M4、16GB RAM | 运行良好；MeikiOCR 为默认引擎，也可切换 Apple Vision |
 | iPadOS | Apple M2、8GB RAM | 使用 TranslateGemma 4B IQ4_XS，运行效果尚可；当前提供未签名 IPA，需用户使用自己的证书自签 |
 | Android | Snapdragon 750G、8GB RAM、Android 11 | 仅验证应用能够打开；由于缺少更高性能 Android 设备，尚未验证实际 OCR、模型速度和长时间运行效果 |
-| Windows | Windows 10/11 x64 | 正在进行原生构建与实机验证；OCR 固定使用 MeikiOCR，翻译后端可选 CUDA、Vulkan 或 CPU |
+| Windows | Windows 10/11 x64 | 已完成 Windows x64 原生构建并生成 NSIS 安装程序；实机功能与性能仍在验证，OCR 固定使用 MeikiOCR，翻译后端可选 CUDA、Vulkan 或 CPU |
 
 以上结论只代表列出的设备和当前 Alpha 构建，不构成对其他硬件性能、稳定性或兼容性的保证。
 
@@ -60,7 +60,7 @@ rustup update stable
 npm run desktop:dev
 ```
 
-生成 macOS `.app` / `.dmg`（当前 Alpha 使用本地临时签名，不可直接公开分发）：
+生成 macOS `.app` / `.dmg`（当前 Alpha 未做 Apple Developer ID 签名和公证，首次打开可能需要在系统设置中确认）：
 
 ```bash
 npm run desktop:build
@@ -74,6 +74,28 @@ src-tauri/target/release/bundle/dmg/NSTrans_0.1.0_aarch64.dmg
 ```
 
 macOS 客户端内置 llama/ggml 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）；MeikiOCR 与 ONNX 权重随应用分发并作为主 OCR，Apple Vision 只在 MeikiOCR 不可用时回退。最终用户无需安装 Python 或启动外部模型服务。
+
+## iPadOS 构建
+
+iPadOS 只使用 Apple Vision OCR。默认构建无签名 IPA，方便用户使用自己的开发证书自签；需要 Xcode 16、Rust iOS target 和 Tauri iOS 工程：
+
+```bash
+rustup target add aarch64-apple-ios
+npm run ios:build
+```
+
+产物位于 `src-tauri/gen/apple/build/arm64/NSTrans.ipa`。如果构建机已配置开发团队并希望让 Xcode 正常签名和导出，可设置 `NSTRANS_IOS_ALLOW_SIGNING=1` 后构建。
+
+## Android 构建
+
+Android 当前只提供 arm64 调试签名测试包，需要 Android SDK、NDK、Java 17 与 Rust Android target：
+
+```bash
+rustup target add aarch64-linux-android
+npm run android:build
+```
+
+产物位于 `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`。该包只用于兼容性测试，不应视为经过发布签名的正式版本。
 
 ## Windows 构建
 
@@ -103,7 +125,9 @@ npm run build
 
 ## Alpha 构建下载
 
-GitHub Releases 提供当前已构建的 macOS DMG、需要自签的 iPadOS IPA，以及未经性能验证的 Android arm64 APK。它们仅供测试，不代表正式发布质量；模型通常需要首次启动后另行下载或由用户选择本地文件。
+[GitHub Releases](https://github.com/qwertrewqwertrewq/nstrans/releases) 提供 Windows x64 安装程序、macOS Apple Silicon DMG、需要自签的 iPadOS IPA，以及未经性能验证的 Android arm64 APK。它们仅供测试，不代表正式发布质量；模型通常需要首次启动后另行下载或由用户选择本地文件。
+
+发行包不包含游戏画面、测试录像、剧情文本或 TranslateGemma 模型权重。仓库中的本地摄像头测试脚本只负责产生或读取开发者自行准备的测试输入，测试录像不会提交到版本库或上传到 Release。
 
 ## 目录结构
 
