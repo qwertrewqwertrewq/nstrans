@@ -1,0 +1,127 @@
+name: nstrans
+options:
+  bundleIdPrefix: xyz.nstrans.client
+  deploymentTarget:
+    iOS: 17.0
+fileGroups: [../../src]
+configs:
+  debug: debug
+  release: release
+settingGroups:
+  app:
+    base:
+      PRODUCT_NAME: NSTrans
+      PRODUCT_BUNDLE_IDENTIFIER: xyz.nstrans.client
+targetTemplates:
+  app:
+    type: application
+    sources:
+      - path: Sources
+    scheme:
+      environmentVariables:
+        RUST_BACKTRACE: full
+        RUST_LOG: info
+    settings:
+      groups: [app]
+targets:
+  nstrans_iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-20x20@1x.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-20x20@2x-1.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-29x29@1x.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-29x29@2x.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-40x40@1x.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-40x40@2x-1.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-76x76@1x.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-76x76@2x.png
+        buildPhase: resources
+      - path: Assets.xcassets/AppIcon.appiconset/AppIcon-83.5x83.5@2x.png
+        buildPhase: resources
+      - path: nstrans_iOS
+      - path: assets
+        buildPhase: resources
+        type: folder
+      - path: LaunchScreen.storyboard
+    info:
+      path: nstrans_iOS/Info.plist
+      properties:
+        LSRequiresIPhoneOS: true
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiredDeviceCapabilities: [arm64, metal]
+        NSCameraUsageDescription: NSTrans 需要访问 USB 采集卡以识别并翻译游戏画面。
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleShortVersionString: 0.1.0
+        CFBundleVersion: "0.1.0"
+        CFBundleIcons~ipad:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - AppIcon-20x20
+              - AppIcon-29x29
+              - AppIcon-40x40
+              - AppIcon-76x76
+              - AppIcon-83.5x83.5
+    entitlements:
+      path: nstrans_iOS/nstrans_iOS.entitlements
+    scheme:
+      environmentVariables:
+        RUST_BACKTRACE: full
+        RUST_LOG: info
+    settings:
+      base:
+        ENABLE_BITCODE: false
+        ARCHS: [arm64]
+        VALID_ARCHS: arm64
+        TARGETED_DEVICE_FAMILY: 2
+        LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
+        LIBRARY_SEARCH_PATHS[arch=arm64]: $(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
+        EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+      groups: [app]
+    dependencies:
+      - framework: libapp.a
+        embed: false
+      - sdk: CoreGraphics.framework
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: Security.framework
+      - sdk: UIKit.framework
+      - sdk: WebKit.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreImage.framework
+      - sdk: ImageIO.framework
+      - sdk: Vision.framework
+    preBuildScripts:
+      - script: |
+          set -e
+          mkdir -p "$SRCROOT/assets/assets"
+          /usr/bin/ditto "$SRCROOT/../../../dist/index.html" "$SRCROOT/assets/index.html"
+          /usr/bin/ditto "$SRCROOT/../../../dist/favicon.svg" "$SRCROOT/assets/favicon.svg"
+          /usr/bin/ditto "$SRCROOT/../../../dist/icons.svg" "$SRCROOT/assets/icons.svg"
+          /usr/bin/ditto "$SRCROOT/../../../dist/assets" "$SRCROOT/assets/assets"
+        name: Sync Frontend Assets
+        basedOnDependencyAnalysis: false
+      - script: node "$SRCROOT/../../../node_modules/@tauri-apps/cli/tauri.js" ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+        name: Build Rust Code
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/Externals/arm64/release/libapp.a

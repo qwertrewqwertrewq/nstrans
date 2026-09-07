@@ -1,0 +1,2 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;600&display=swap');
+:root{font-family:'DM Sans','Noto Sans JP',-apple-system,BlinkMacSystemFont,sans-serif;color:#e8edf7;background:#080b12;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}html,body,#root{margin:0;min-width:320px;min-height:100%}body{min-height:100vh;background:radial-gradient(circle at 18% 0%,#172038 0,transparent 30rem),#080b12}button,select,input{font:inherit}button{color:inherit}

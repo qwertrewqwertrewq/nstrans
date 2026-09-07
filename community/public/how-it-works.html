@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="NSTrans 社区词库工作方式"><title>工作方式 · NSTrans</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/styles.css"></head>
+<body data-page="guide">
+  <nav class="site-nav"><a class="brand" href="/"><span>NS</span>TRANS</a><div class="site-links"><a class="active" href="/how-it-works">工作方式</a><a href="/client">客户端接入</a><a class="button compact" href="/dashboard">控制面板 <b>↗</b></a></div></nav>
+  <main class="guide-main">
+    <header class="guide-hero"><span class="kicker">HOW IT WORKS / 01</span><h1>模型解决第一次，<br>词库解决之后每一次。</h1><p>NSTrans 将客户端产生的高质量翻译沉淀成按游戏隔离的公共词库，并通过评分持续选择更好的答案。</p></header>
+    <section class="process-grid">
+      <article><span>01</span><h2>匿名读取</h2><p>客户端启动后下载通用词库和当前游戏词库。读取不需要账号或 API Key。</p></article>
+      <article><span>02</span><h2>本地优先</h2><p>OCR 文本先在本地词库中进行完整与内部匹配，未命中时才调用翻译模型。</p></article>
+      <article><span>03</span><h2>主动共享</h2><p>共享默认关闭。启用后也只接收专名、单词和菜单短标签，不上传对白或描述文本。</p></article>
+      <article><span>04</span><h2>社区校正</h2><p>同一原文最多保留三条不同译文。贡献者赞踩后，客户端取得评分最高的版本。</p></article>
+    </section>
+    <section class="guide-callout"><div><span class="kicker">DATA FLOW</span><h2>OCR → 本地词库 → TranslateGemma → 社区词库</h2></div><a class="text-link" href="/client">继续查看客户端接入 <b>→</b></a></section>
+  </main>
+  <footer class="simple-footer"><a class="brand" href="/"><span>NS</span>TRANS</a><p>开放的游戏翻译基础设施 · CC BY 4.0</p></footer>
+</body></html>

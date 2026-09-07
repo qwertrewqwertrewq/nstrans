@@ -1,0 +1,50 @@
+{
+  "name": "nstrans",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run native:build && vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint src community/worker community/public/app.js vite.config.ts",
+    "test": "vitest run",
+    "preview": "vite preview",
+    "desktop:dev": "node scripts/run-tauri.mjs dev",
+    "desktop:build": "node scripts/run-tauri.mjs build --bundles app && node scripts/build-macos-dmg.mjs",
+    "windows:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1",
+    "windows:dev": "npm run windows:runtime && node scripts/run-tauri.mjs dev",
+    "windows:build": "npm run windows:runtime && node scripts/run-tauri.mjs build --bundles nsis",
+    "android:dev": "node scripts/run-android.mjs dev",
+    "android:build": "node scripts/run-android.mjs build --debug --apk --target aarch64 --ci",
+    "ios:init": "node scripts/run-tauri.mjs ios init --ci",
+    "ios:build": "node scripts/run-tauri.mjs ios build --ci",
+    "community:dev": "npx wrangler dev --config community/wrangler.jsonc",
+    "community:deploy": "npx wrangler deploy --config community/wrangler.jsonc",
+    "community:migrate": "npx wrangler d1 migrations apply DB --remote --config community/wrangler.jsonc",
+    "community:sync-katakana": "node scripts/sync-common-katakana.mjs",
+    "native:build": "node scripts/build-native.mjs",
+    "ocr:setup": "python3 -m venv .venv && .venv/bin/pip install meikiocr",
+    "models:setup": "ollama pull translategemma:4b"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "lucide-react": "^1.38.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "jsdom": "^29.1.1",
+    "oxlint": "^1.79.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}

@@ -1,0 +1,62 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.venv/
+.build/
+artifacts/
+native/macos/bin/
+native/runtime/macos/
+native/runtime/windows/*.exe
+native/runtime/windows/lib/
+dist
+dist-ssr
+*.local
+
+# Local secrets and developer configuration
+.env
+.env.*
+!.env.example
+
+# Platform build outputs and generated runtime payloads
+community/.wrangler/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/build/
+src-tauri/gen/android/buildSrc/.gradle/
+src-tauri/gen/android/buildSrc/build/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/app/src/main/jniLibs/
+src-tauri/gen/android/app/src/main/assets/bin/
+src-tauri/gen/android/app/src/main/assets/runtime/
+src-tauri/gen/apple/assets/
+src-tauri/gen/apple/build/
+src-tauri/gen/apple/Externals/
+src-tauri/gen/apple/**/xcuserdata/
+
+# Installers, archives, models selected at runtime, and signing material
+*.apk
+*.aab
+*.ipa
+*.dmg
+*.gguf
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

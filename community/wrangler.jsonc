@@ -1,0 +1,28 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "nstrans-community",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-05-03",
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "nstrans.221129.xyz", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nstrans-community",
+      "database_id": "1ef709de-2a80-493a-a3b1-5b3d8046d8d7",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "SITE_ORIGIN": "https://nstrans.221129.xyz",
+    "ADMIN_GITHUB_LOGINS": "qwertrewqwertrewq",
+    "LICENSE_NAME": "CC BY 4.0"
+  }
+}

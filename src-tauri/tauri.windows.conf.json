@@ -1,0 +1,11 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "../native/runtime/windows/nstrans-llama.exe": "runtime/nstrans-llama.exe",
+      "../native/runtime/windows/lib": "runtime/lib",
+      "../native/runtime/windows/nstrans-meiki-ocr.exe": "runtime/nstrans-meiki-ocr.exe"
+    }
+  }
+}
