@@ -10,8 +10,8 @@
 |---|---|---|
 | macOS | Apple M4、16GB RAM | 运行良好；MeikiOCR 为默认引擎，也可切换 Apple Vision |
 | iPadOS | Apple M2、8GB RAM | 使用 TranslateGemma 4B IQ4_XS，运行效果尚可；当前提供未签名 IPA，需用户使用自己的证书自签 |
-| Android | Snapdragon 750G、8GB RAM、Android 11 | 仅验证应用能够打开；由于缺少更高性能 Android 设备，尚未验证实际 OCR、模型速度和长时间运行效果 |
-| Windows | Windows 10/11 x64 | 已完成 Windows x64 原生构建并生成 NSIS 安装程序；实机功能与性能仍在验证，OCR 固定使用 MeikiOCR，翻译后端可选 CUDA、Vulkan 或 CPU |
+| Android | Snapdragon 750G、8GB RAM、Android 11 | 已完成 arm64 APK、原生 USB 采集卡、MeikiOCR 与 llama.cpp 接入；现有设备只验证应用可启动，尚无足够性能完成实际翻译效果与长期稳定性验证 |
+| Windows | Windows 10/11 x64 | 已完成 Windows x64 客户端、MeikiOCR、内置 Ollama、CUDA/Vulkan/CPU 后端选择及 NSIS 安装程序 |
 
 以上结论只代表列出的设备和当前 Alpha 构建，不构成对其他硬件性能、稳定性或兼容性的保证。
 
@@ -20,25 +20,26 @@
 - 视频画面、截图和完整 OCR 识别文本只在客户端即时处理，不上传至 NSTrans 社区服务器，服务器也不保存用户截取画面中的对白、剧情文本或画面内容。
 - 客户端本机只会为复用翻译而缓存符合限制的专有名词、单词和短菜单标签；不会建立视频、截图或长篇游戏文本档案。用户可以通过清除应用数据移除这些本地缓存。
 - “共享本地词库贡献”默认关闭。开启后仍只允许上传经过长度、结构和标点过滤的专有名词、单词与短句，不允许上传对白、描述或连续剧情文本。
-- 自动学习的专业词汇来自 Wikipedia、Wikidata 等公开可访问渠道，并保存来源链接；搜索候选只作为模型术语提示，不会把网页内容复制进游戏文本库。
+- 自动学习的专业词汇来自 Wikipedia、Wikidata 或用户配置的搜索服务，并保存来源链接；搜索候选只作为模型术语提示，不会把网页内容复制进游戏文本库。
 - NSTrans 不包含、托管或授权任何游戏画面、剧情文本、商标或其他游戏资产。相关权利归各自权利人所有；本项目与任天堂及其他游戏发行商、开发商无隶属或背书关系。
 
 ## 当前能力
 
-- 枚举并打开 USB 采集卡/摄像头（浏览器 `MediaDevices`）
-- 左侧 1/4 画面预览，支持扩大预览和系统全屏
+- 枚举并打开 USB 采集卡/摄像头；桌面端使用系统媒体设备，Android 与 iPadOS 还包含原生 USB/UVC 输入桥接
+- 桌面端一体化预览与控制面板，移动端默认全屏预览；支持全窗口、系统全屏、暂停画面、框选 OCR 区域及悬浮工具栏
 - macOS 默认使用 Apache-2.0 的 MeikiOCR 游戏日文模型并可切换 Apple Vision；Windows 与 Android 使用 MeikiOCR；iPadOS 只使用 Apple Vision
-- Switch 游戏策略会保留相邻多行对话，并过滤 A/B/X/Y、L/R/ZL/ZR 操作提示、角落 HUD、小字号标签与假名注音碎片
-- 基于文字包围框模糊原文并覆盖译文
+- Switch 游戏策略会合并连续文字、抑制假名注音碎片和孤立按键图标，并保留可信的小字号说明与底部按键提示词
+- 基于文字包围框模糊原文并覆盖译文；长译文滚动显示时锁定近似区域，避免重复翻译和覆盖层跳动
 - 分别显示采集、OCR、翻译、渲染和端到端延迟
+- 内置带时间戳的运行日志，记录 OCR 模型启动、识别数量、词库命中、专名搜索和 LLM 请求/响应
 - 唯一翻译模型为 TranslateGemma 4B；已下载的远程词库包和持久化翻译记忆优先命中，新短句、单词与对白才调用模型
 - 同一帧长文本批量送入同一上下文；持续游戏对白会复用上下文，默认 45 秒无长文后自动开始新对话，也可手动重置
-- 客户端不内置通用或单个游戏词库，只保留游戏类别；未来由服务器按游戏 ID 和版本分发词库包
-- 未知专名可通过 Wikipedia 跨语言词条在后台学习，无需 API Key，非精确结果只保存为待确认候选
-- 用户可选择是否共享本机产生的短文本译文和百科术语；默认关闭，服务器未配置前只写入本地待上传队列
-- Tauri 2 桌面壳层以及 macOS 摄像头权限描述
+- 客户端启动时从 `nstrans.221129.xyz` 同步通用词库和当前游戏词库，并保留本地缓存；游戏词库优先于通用词库匹配
+- 未知片假名专名可选择 Wikipedia/Wikidata、Brave Search 或百度千帆作为主搜索服务，并可另选一个无结果时的回退服务；后两者需要用户自己的 API Key
+- 用户可选择是否向社区服务器共享本机产生的专名、单词和短标签；默认关闭，上传内容还会经过长度、结构和标点过滤
+- Tauri 2 共用壳层，配合 macOS/iPadOS Apple 原生能力、Android JNI/Kotlin 桥接及 Windows 原生运行时
 
-TranslateGemma 4B 在本机执行。开启“在线学习专有名词”后，仅抽取出的候选专名会发送到 Wikimedia 公共接口；普通对白不会上传。
+TranslateGemma 4B 在本机执行。开启“在线学习专有名词”后，仅当前游戏名称和抽取出的候选专名会发送到用户选择的搜索服务；普通对白和完整 OCR 文本不会上传。
 
 ## 本机运行
 
@@ -75,7 +76,7 @@ src-tauri/target/release/bundle/macos/NSTrans.app
 src-tauri/target/release/bundle/dmg/NSTrans_0.1.0_aarch64.dmg
 ```
 
-macOS 客户端内置 Ollama 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）。NSTrans 会在本机回环地址启动隔离的 Ollama 服务，不依赖用户另行安装或启动 Ollama；MeikiOCR 与 ONNX 权重随应用分发并作为主 OCR，Apple Vision 只在 MeikiOCR 不可用时回退。最终用户无需安装 Python 或启动外部模型服务。
+macOS 客户端内置 Ollama 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）。NSTrans 会在本机回环地址启动隔离的 Ollama 服务，不依赖用户另行安装或启动 Ollama；MeikiOCR 与 ONNX 权重随应用分发并作为默认 OCR，Apple Vision 可由用户手动选择，并在 MeikiOCR 不可用时作为回退。所选 OCR 引擎会保存到本机。最终用户无需安装 Python 或启动外部模型服务。
 
 ## iPadOS 构建
 
@@ -101,9 +102,9 @@ npm run android:build
 
 ## Windows 构建
 
-Windows x64 客户端只使用 MeikiOCR，不加载 Apple Vision 或 Tesseract 回退。TranslateGemma 使用随应用分发的 Ollama 运行时，用户可在控制台选择 Ollama 的 CUDA、Vulkan 或 CPU 推理后端；选择会保存在本机并在切换后重启模型进程。
+Windows x64 客户端只使用 MeikiOCR，不加载 Apple Vision 或 Tesseract 回退。TranslateGemma 使用随应用分发的 Ollama 运行时，用户可在控制台选择 Ollama 的 CUDA、Vulkan 或 CPU 推理后端；选择会保存在本机并在切换后重启模型进程。MeikiOCR、模型管理、三种后端选择和 NSIS 打包均已完成接入。
 
-构建机需要 Windows 10/11 x64、Node.js 20+、Rust stable、Visual Studio 2022 C++ Build Tools、WebView2，以及 Python 3.11。首次执行会下载官方 Windows Ollama 独立运行包，并把 MeikiOCR 与模型打包成离线 EXE：
+构建机需要 Windows 10/11 x64、Node.js 20+、Rust stable、Visual Studio 2022 C++ Build Tools、WebView2，以及 Python 3.11。首次执行会下载官方 Windows Ollama 独立运行包，并把 MeikiOCR 工作进程及其 ONNX 权重打包成离线 EXE；TranslateGemma 权重不放入安装包，由客户端首次运行时下载或由用户导入：
 
 ```powershell
 npm install
@@ -116,6 +117,27 @@ npm run windows:build
 ```text
 src-tauri\target\release\bundle\nsis\NSTrans_0.1.0_x64-setup.exe
 ```
+
+## TranslateGemma 4B 量化版本与兼容限制
+
+各平台使用相同的 TranslateGemma 4B 基础模型，但运行时、量化文件和内存需求不同，不能把“模型名称相同”理解为模型文件可以任意互换：
+
+| 平台 | 默认模型/量化 | 大小参考 | 当前验证情况 |
+|---|---|---:|---|
+| macOS | Ollama 官方 `translategemma:4b`，Q4_K_M | 约 3.3GB | Apple M4、16GB RAM 运行良好 |
+| Windows | Ollama 官方 `translategemma:4b`，Q4_K_M | 约 3.3GB | 已完成内置 Ollama 和三种后端接入 |
+| iPadOS | `mradermacher/translategemma-4b-it-GGUF`，IQ4_XS | 约 2.4GB | Apple M2、8GB RAM 实测可用，效果尚可 |
+| Android | `Qwe1325/translategemma-4b-it-GGUF`，Q4_K_M | 约 2.5GB | 当前默认下载源；受测试设备性能限制，尚未完成实际翻译验证 |
+
+移动端直接使用 `llama-cpp-2`，必须选择与当前 llama.cpp Gemma 3 文本加载器兼容的、完整的 TranslateGemma 文本 GGUF。以下文件不能直接使用：
+
+- Ollama 模型仓库中的组合 blob。它可能同时包含文本与视觉张量，Ollama 能加载，但上游 llama.cpp 通常要求视觉投影器独立提供。
+- 单独的 `mmproj` 视觉投影文件、Transformers 原始权重、拆分但尚未合并的 GGUF，以及其他 Gemma/TranslateGemma 参数规模的模型。
+- 只因为扩展名为 `.gguf` 就假定兼容的第三方文件。客户端的初步检查只能确认文件大小和 GGUF 文件头，真正加载时仍可能因架构、张量、元数据或内存不足而失败。
+
+Android 之前出现过 `NullResult`/模型加载失败，原因范围包括误用 Ollama 组合 blob、不兼容 GGUF、缺少 Gemma 3 元数据、张量不匹配和内存分配失败。当前代码改用面向 llama.cpp 的文本 GGUF，并补充 `gemma3.attention.layer_norm_rms_epsilon` 参数覆盖，但这不能保证任意第三方量化都兼容。排查移动端加载问题时必须查看 Android logcat 或 Xcode 设备日志；顶层 `NullResult` 本身不会保留底层具体原因。
+
+模型文件大小也不等于运行时 RAM 占用。除权重外还需要 KV cache、计算图、图像/OCR 缓冲区和系统内存。8GB iPad 使用 IQ4_XS 已经实测；8GB Android 是否能稳定运行 Q4_K_M 取决于系统可用内存、厂商限制和 CPU 性能，当前不作可用性保证。
 
 ## 验证
 
@@ -136,7 +158,7 @@ git tag v0.1.1
 git push myrepo v0.1.1
 ```
 
-也可以在 GitHub 的 Actions 页面手动运行 “Cross-platform release”，填写一个已经存在的标签。工作流默认创建或沿用预发布版本，不需要保存 Apple 证书、Android keystore 或个人访问令牌。当前 iPadOS 产物仍由用户自行签名，Android 产物仍是调试签名；正式发行签名应在后续通过 GitHub Environments 单独配置。
+也可以在 GitHub 的 Actions 页面手动运行 “Cross-platform release”，填写一个已经存在并包含该工作流的标签。工作流默认创建或沿用预发布版本，不需要保存 Apple 证书、Android keystore 或个人访问令牌。当前 iPadOS 产物由用户自行签名，Android 产物是调试签名；如需正式发行签名，需要另外通过 GitHub Environments 配置证书和密钥。
 
 ## Alpha 构建下载
 
@@ -158,7 +180,7 @@ src/
   gameAdapters/registry.ts       仅包含可选择的游戏类别元数据
   App.tsx                       采集、管线调度、覆盖层与控制台
 native/translation/             旧模型迁移文件（当前运行路径不加载）
-src-tauri/                macOS/Windows/Android 共用原生壳层
+src-tauri/                macOS、Windows、Android 与 iPadOS 共用原生壳层及平台桥接
 ```
 
 ## 跨平台运行时边界

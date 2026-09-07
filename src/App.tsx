@@ -455,7 +455,7 @@ function App() {
     catch (reason) { const message = errorMessage(reason, '模型处理失败'); setError(message); setModelStatusMessage(message) }
     finally { setInstallingModel(false) }
   }
-  const downloadTranslateGemma = () => runModelAction(installTranslateGemma, `正在下载 TranslateGemma 4B ${clientPlatform === 'ios' ? 'IQ4_XS（约 2.4GB）' : 'Q4_K_M（约 3.3GB）'}…`, 'TranslateGemma 4B 已启用')
+  const downloadTranslateGemma = () => runModelAction(installTranslateGemma, `正在下载 TranslateGemma 4B ${clientPlatform === 'ios' ? 'IQ4_XS（约 2.4GB）' : clientPlatform === 'android' ? 'Q4_K_M（约 2.5GB）' : 'Q4_K_M（约 3.3GB）'}…`, 'TranslateGemma 4B 已启用')
   const downloadModelUrl = () => {
     const url = modelUrl.trim()
     if (!url) { setError('请先输入 GGUF 模型 URL'); return }
@@ -504,13 +504,13 @@ function App() {
           <div className="inline-select"><label>游戏类别</label><div className="select-wrap"><select value={routing.gameId} onChange={(event) => selectGame(event.target.value as GameId)}>{gameOptions.map((game) => <option value={game.id} key={game.id}>{game.label}</option>)}</select><ChevronDown size={13} /></div></div>
           <div className="notice success">{selectedGame.description}</div>
           <div className="notice">远程词库：{dictionaryStatus.version ? `${dictionaryStatus.version} · ${dictionaryStatus.entries} 条` : '尚未配置服务器/未下载'}</div>
-          <div className="engine-status"><EngineState label={`TranslateGemma 4B ${clientPlatform === 'ios' ? 'IQ4_XS · Metal' : clientPlatform === 'windows' ? `· llama.cpp · ${llamaBackend.toUpperCase()}` : '· 内置 llama 运行时'}`} ready={runtimeStatus.translategemma} /></div>
-          {clientPlatform === 'windows' && <div className="windows-backend"><label>llama.cpp 推理后端</label><div className="segmented three"><button disabled={installingModel} className={llamaBackend === 'cuda' ? 'active' : ''} onClick={() => void selectLlamaBackend('cuda')}>CUDA</button><button disabled={installingModel} className={llamaBackend === 'vulkan' ? 'active' : ''} onClick={() => void selectLlamaBackend('vulkan')}>Vulkan</button><button disabled={installingModel} className={llamaBackend === 'cpu' ? 'active' : ''} onClick={() => void selectLlamaBackend('cpu')}>CPU</button></div><small className="muted">CUDA 适用于 NVIDIA；Vulkan 适用于支持 Vulkan 的 NVIDIA、AMD 或 Intel；CPU 兼容性最高。切换会重新启动模型运行时。</small></div>}
+          <div className="engine-status"><EngineState label={`TranslateGemma 4B ${clientPlatform === 'ios' ? 'IQ4_XS · llama.cpp · Metal' : clientPlatform === 'android' ? 'Q4_K_M · llama.cpp · CPU' : clientPlatform === 'windows' ? `· Ollama · ${llamaBackend.toUpperCase()}` : '· 内置 Ollama'}`} ready={runtimeStatus.translategemma} /></div>
+          {clientPlatform === 'windows' && <div className="windows-backend"><label>Ollama 推理后端</label><div className="segmented three"><button disabled={installingModel} className={llamaBackend === 'cuda' ? 'active' : ''} onClick={() => void selectLlamaBackend('cuda')}>CUDA</button><button disabled={installingModel} className={llamaBackend === 'vulkan' ? 'active' : ''} onClick={() => void selectLlamaBackend('vulkan')}>Vulkan</button><button disabled={installingModel} className={llamaBackend === 'cpu' ? 'active' : ''} onClick={() => void selectLlamaBackend('cpu')}>CPU</button></div><small className="muted">CUDA 适用于 NVIDIA；Vulkan 适用于支持 Vulkan 的 NVIDIA、AMD 或 Intel；CPU 兼容性最高。切换会重新启动模型运行时。</small></div>}
           {!runtimeStatus.translategemma && <div className="model-manager">
             <button className="scan-button" disabled={installingModel} onClick={() => void downloadTranslateGemma()}>{installingModel ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}官方远程下载</button>
             <div className="model-url-row"><input type="url" value={modelUrl} disabled={installingModel} onChange={(event) => setModelUrl(event.target.value)} placeholder="https://…/model.gguf" aria-label="GGUF 模型 URL" /><button className="secondary" disabled={installingModel} onClick={downloadModelUrl}>下载 URL</button></div>
             <button className="secondary model-file-button" disabled={installingModel} onClick={() => void selectLocalModel()}>选择本地 GGUF 模型</button>
-            <small className="muted">{clientPlatform === 'ios' ? 'iPad 默认使用 IQ4_XS；也可通过 URL 下载兼容的 TranslateGemma GGUF。' : '指定 URL 或本地模型会替换当前翻译模型；请使用兼容 TranslateGemma 提示格式的 GGUF。'}</small>
+            <small className="muted">{clientPlatform === 'ios' ? 'iPad 默认使用 IQ4_XS；只能导入兼容 llama.cpp 的完整 TranslateGemma 文本 GGUF。' : clientPlatform === 'android' ? 'Android 默认使用 Q4_K_M；不要导入 Ollama 组合 blob、mmproj 或其他不兼容 GGUF。' : '指定 URL 或本地模型会替换当前翻译模型；请使用兼容 TranslateGemma 提示格式的 GGUF。'}</small>
             {modelStatusMessage && <small className="muted">{modelStatusMessage}</small>}
           </div>}
           <div className="toggle-row"><div><strong>在线学习专有名词</strong><small>精确跨语言词条自动入库，相似结果仅候选</small></div><button className={`toggle ${routing.entityLookupEnabled ? 'on' : ''}`} aria-label="在线学习专有名词" onClick={() => setRouting({ ...routing, entityLookupEnabled: !routing.entityLookupEnabled })}><span /></button></div>
