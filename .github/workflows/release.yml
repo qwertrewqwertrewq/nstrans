@@ -1,0 +1,249 @@
+name: Cross-platform release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and update (for example v0.1.1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  OLLAMA_VERSION: 0.12.3
+
+jobs:
+  prepare:
+    name: Prepare GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Create prerelease when missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "NSTrans $RELEASE_TAG Alpha" \
+              --prerelease \
+              --generate-notes
+          fi
+
+  macos:
+    name: macOS Apple Silicon DMG
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install dependencies and native runtimes
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          ./scripts/setup-macos-runtime.sh "$OLLAMA_VERSION"
+
+      - name: Build DMG
+        run: npm run desktop:build
+
+      - name: Stage release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64.dmg "release-assets/NSTrans-${RELEASE_TAG#v}-macOS-arm64.dmg"
+          cd release-assets
+          shasum -a 256 "NSTrans-${RELEASE_TAG#v}-macOS-arm64.dmg" > "NSTrans-${RELEASE_TAG#v}-macOS-arm64.dmg.sha256"
+
+      - name: Upload macOS assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  ipados:
+    name: iPadOS unsigned IPA
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Set up Rust for iOS
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-ios
+
+      - name: Install dependencies and build IPA
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          npm run ios:build
+
+      - name: Stage release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-unsigned.ipa"
+          cd release-assets
+          shasum -a 256 "NSTrans-${RELEASE_TAG#v}-iPadOS-unsigned.ipa" > "NSTrans-${RELEASE_TAG#v}-iPadOS-unsigned.ipa.sha256"
+
+      - name: Upload iPadOS assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  android:
+    name: Android arm64 debug APK
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK and Rust
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+
+      - name: Install dependencies and build APK
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          npm run android:build
+
+      - name: Stage release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug.apk"
+          cd release-assets
+          sha256sum "NSTrans-${RELEASE_TAG#v}-Android-arm64-debug.apk" > "NSTrans-${RELEASE_TAG#v}-Android-arm64-debug.apk.sha256"
+
+      - name: Upload Android assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+
+  windows:
+    name: Windows x64 NSIS installer
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install dependencies and native runtimes
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:OLLAMA_VERSION
+
+      - name: Build NSIS installer
+        run: npm run windows:build
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          $Version = $env:RELEASE_TAG.TrimStart('v')
+          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          $Target = "release-assets/NSTrans-$Version-Windows-x64-setup.exe"
+          Copy-Item $Source.FullName $Target
+          $Hash = (Get-FileHash $Target -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$Hash  $(Split-Path $Target -Leaf)" | Set-Content "$Target.sha256" -Encoding ascii
+
+      - name: Upload Windows assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:RELEASE_TAG release-assets/* --repo $env:GITHUB_REPOSITORY --clobber

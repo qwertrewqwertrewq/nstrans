@@ -1,5 +1,7 @@
 # NSTrans
 
+[![CI](https://github.com/qwertrewqwertrewq/nstrans/actions/workflows/ci.yml/badge.svg)](https://github.com/qwertrewqwertrewq/nstrans/actions/workflows/ci.yml)
+
 面向 macOS、Windows、Android 与 iPadOS 的实时日文 OCR 与翻译覆盖工具。业务界面与平台原生能力分层，桌面端均可离线运行 OCR 与翻译模型。
 
 ## 平台实测状态
@@ -122,6 +124,19 @@ npm run test
 npm run lint
 npm run build
 ```
+
+## GitHub Actions 自动构建
+
+`.github/workflows/ci.yml` 会在 `main` 的提交和拉取请求上执行测试、Lint 与前端构建。跨平台安装包不会在每次提交时重复生成，以控制构建时间和存储占用。
+
+推送 `v*` 标签会触发 `.github/workflows/release.yml`，并行生成 Windows x64 NSIS、macOS Apple Silicon DMG、未签名 iPadOS IPA 和 Android arm64 调试 APK，然后使用仓库自动提供的 `GITHUB_TOKEN` 直接上传到对应 GitHub Release：
+
+```bash
+git tag v0.1.1
+git push myrepo v0.1.1
+```
+
+也可以在 GitHub 的 Actions 页面手动运行 “Cross-platform release”，填写一个已经存在的标签。工作流默认创建或沿用预发布版本，不需要保存 Apple 证书、Android keystore 或个人访问令牌。当前 iPadOS 产物仍由用户自行签名，Android 产物仍是调试签名；正式发行签名应在后续通过 GitHub Environments 单独配置。
 
 ## Alpha 构建下载
 
