@@ -75,7 +75,7 @@ src-tauri/target/release/bundle/macos/NSTrans.app
 src-tauri/target/release/bundle/dmg/NSTrans_0.1.0_aarch64.dmg
 ```
 
-macOS 客户端内置 llama/ggml 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）；MeikiOCR 与 ONNX 权重随应用分发并作为主 OCR，Apple Vision 只在 MeikiOCR 不可用时回退。最终用户无需安装 Python 或启动外部模型服务。
+macOS 客户端内置 Ollama 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）。NSTrans 会在本机回环地址启动隔离的 Ollama 服务，不依赖用户另行安装或启动 Ollama；MeikiOCR 与 ONNX 权重随应用分发并作为主 OCR，Apple Vision 只在 MeikiOCR 不可用时回退。最终用户无需安装 Python 或启动外部模型服务。
 
 ## iPadOS 构建
 
@@ -101,7 +101,7 @@ npm run android:build
 
 ## Windows 构建
 
-Windows x64 客户端只使用 MeikiOCR，不加载 Apple Vision 或 Tesseract 回退。TranslateGemma 使用随应用分发的 Ollama/llama.cpp 运行时，用户可在控制台选择 CUDA、Vulkan 或 CPU；选择会保存在本机并在切换后重启模型进程。
+Windows x64 客户端只使用 MeikiOCR，不加载 Apple Vision 或 Tesseract 回退。TranslateGemma 使用随应用分发的 Ollama 运行时，用户可在控制台选择 Ollama 的 CUDA、Vulkan 或 CPU 推理后端；选择会保存在本机并在切换后重启模型进程。
 
 构建机需要 Windows 10/11 x64、Node.js 20+、Rust stable、Visual Studio 2022 C++ Build Tools、WebView2，以及 Python 3.11。首次执行会下载官方 Windows Ollama 独立运行包，并把 MeikiOCR 与模型打包成离线 EXE：
 
@@ -163,15 +163,24 @@ src-tauri/                macOS/Windows/Android 共用原生壳层
 
 ## 跨平台运行时边界
 
-词库、翻译记忆、实体检索接口和上下文完全位于纯 TypeScript 层。当前 macOS 开发适配器用 Ollama 执行 TranslateGemma；发行版按平台替换底层执行器：
+词库、翻译记忆、实体检索接口和上下文完全位于纯 TypeScript 层。各平台当前使用的实际 LLM 接入方式如下：
 
-| 平台 | TranslateGemma 4B | 翻译记忆 | 实体检索 |
+| 平台 | NSTrans 实际接入层 | 推理配置 | 模型格式 |
 |---|---|---|---|
-| macOS 开发版 | Ollama | localStorage | Wikimedia API |
-| macOS/Windows 发行目标 | llama.cpp/GGUF | SQLite/键值存储 | 可替换 Provider |
-| Android 发行目标 | llama.cpp JNI/GGUF | SQLite/键值存储 | 可替换 Provider |
+| macOS 发行版 | 应用内置 Ollama，通过本机回环地址调用 `/api/chat` | Ollama 自动使用可用的 Apple Silicon/Metal 后端 | Ollama 模型或导入的 GGUF |
+| Windows 发行版 | 应用内置 Ollama，通过本机回环地址调用 `/api/chat` | 用户可选择 Ollama 的 CUDA、Vulkan 或 CPU 后端 | Ollama 模型或导入的 GGUF |
+| Android | Rust 通过 `llama-cpp-2` 直接静态链接 llama.cpp | 当前固定 CPU，`n_gpu_layers = 0` | GGUF |
+| iPadOS | Rust 通过 `llama-cpp-2` 直接静态链接 llama.cpp | Metal，模型层尽可能卸载到 GPU | GGUF，推荐 IQ4_XS |
+| 浏览器开发模式 | 调用开发机安装的 Ollama `127.0.0.1:11434` | 由开发机 Ollama 决定 | Ollama 模型 |
 
-模型只通过 `TranslationRuntime` 接口被业务层调用，所以切换 GGUF、CUDA、DirectML 或 NNAPI 不会修改 OCR 管线和 UI 配置。
+Ollama 底层包含 llama.cpp/ggml 相关推理实现，但从 NSTrans 的集成层看，macOS 和 Windows 接入的是完整 Ollama 服务，并不是直接调用 llama.cpp。当前关系可以概括为：
+
+```text
+macOS / Windows -> embedded Ollama -> llama.cpp/ggml backend
+Android / iPadOS -> NSTrans -> llama.cpp (llama-cpp-2)
+```
+
+模型仍只通过 `TranslationRuntime` 接口被业务层调用，因此以后将桌面端从 Ollama 改为直接 llama.cpp 时，不需要修改 OCR 管线、词库策略或翻译界面。
 
 ## 许可证与第三方项目
 
