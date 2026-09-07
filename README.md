@@ -181,6 +181,7 @@ src/
   App.tsx                       采集、管线调度、覆盖层与控制台
 native/translation/             旧模型迁移文件（当前运行路径不加载）
 src-tauri/                macOS、Windows、Android 与 iPadOS 共用原生壳层及平台桥接
+tools/testing/            摄像头枚举、权限检查和虚拟视频源等开发测试工具
 ```
 
 ## 跨平台运行时边界
