@@ -6,15 +6,15 @@ describe('entity lookup', () => {
     expect(buildEntitySearchQuery('グチニザ', ['ゼルダの伝説', '塞尔达传说 王国之泪'])).toBe('塞尔达传说 王国之泪 "グチニザ" 中文 译名')
   })
 
-  it('searches with the complete OCR label while keeping the katakana term as the learned entity', async () => {
+  it('searches only the extracted katakana term and never the complete OCR label', async () => {
     const wiki = { lookup: vi.fn(async () => ({ source: 'チナガレ', status: 'missing' as const })) }
     const web = { search: vi.fn(async () => [{ title: '地名资料', url: 'https://example.com/location', snippet: 'チナガレ湿地帯的中文名称' }]) }
     const result = await new ConfigurableEntityLookup(wiki, web).lookup('チナガレ', {
-      queryText: 'チナガレ湿地帯', gameNames: ['塞尔达传说 王国之泪'],
+      gameNames: ['塞尔达传说 王国之泪'],
       searchSettings: { primary: 'brave', fallback: 'none', qianfanApiKey: '', braveApiKey: 'key' },
     })
-    expect(web.search).toHaveBeenCalledWith('brave', '塞尔达传说 王国之泪 "チナガレ湿地帯" 中文 译名', 'key')
-    expect(result.research).toMatchObject({ term: 'チナガレ', query: '塞尔达传说 王国之泪 "チナガレ湿地帯" 中文 译名' })
+    expect(web.search).toHaveBeenCalledWith('brave', '塞尔达传说 王国之泪 "チナガレ" 中文 译名', 'key')
+    expect(result.research).toMatchObject({ term: 'チナガレ', query: '塞尔达传说 王国之泪 "チナガレ" 中文 译名' })
   })
 
   it('uses the configured fallback only when the primary engine has no results', async () => {

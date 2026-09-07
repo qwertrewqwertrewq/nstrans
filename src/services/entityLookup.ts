@@ -6,8 +6,8 @@ import { defaultEntitySearchSettings, searchEngineKey, type EntitySearchEngineId
 import { writeDiagnosticLog } from './diagnosticLog'
 
 export type EntityLookupResult = Omit<StoredEntity, 'gameId' | 'updatedAt'>
-export type EntityLookupContext = { gameNames?: readonly string[]; searchSettings?: EntitySearchSettings; queryText?: string }
-export type EntityLookupCandidate = { source: string; queryText?: string }
+export type EntityLookupContext = { gameNames?: readonly string[]; searchSettings?: EntitySearchSettings }
+export type EntityLookupCandidate = { source: string }
 export interface EntityLookupProvider { lookup(source: string, context?: EntityLookupContext): Promise<EntityLookupResult> }
 export type EntitySearchHit = { title: string; url: string; snippet: string }
 export interface EntityWebSearchTransport { search(engine: Exclude<EntitySearchEngineId, 'wiki'>, query: string, apiKey: string): Promise<EntitySearchHit[]> }
@@ -35,7 +35,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     if (!exact || !linkedTitle) {
       const wikidata = await this.lookupWikidata(source, candidate)
       if (wikidata.status === 'learned') return wikidata
-      return await this.contextualSearch(source, context.gameNames ?? [], wikidata, context.queryText)
+      return await this.contextualSearch(source, context.gameNames ?? [], wikidata)
     }
 
     const chineseTitle = await this.toSimplifiedChineseTitle(linkedTitle)
@@ -63,11 +63,11 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     return { source, status: wikipediaCandidate || matches.length ? 'pending' : 'missing', sourceUrl: wikipediaCandidate?.title ? `https://ja.wikipedia.org/wiki/${encodeURIComponent(wikipediaCandidate.title.replace(/ /gu, '_'))}` : undefined }
   }
 
-  private async contextualSearch(source: string, gameNames: readonly string[], fallback: EntityLookupResult, queryText?: string): Promise<EntityLookupResult> {
+  private async contextualSearch(source: string, gameNames: readonly string[], fallback: EntityLookupResult): Promise<EntityLookupResult> {
     if (!gameNames.length) return fallback
     const localizedNames = [gameNames.find((name) => /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) ?? gameNames[0], gameNames.find((name) => /\p{Script=Han}/u.test(name) && !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) ?? gameNames.at(-1)!]
     const searches = await Promise.all(['ja', 'zh'].map(async (language, index) => {
-      const query = `${localizedNames[index]} "${queryText?.trim() || source}"`
+      const query = `${localizedNames[index]} "${source}"`
       const url = new URL(`https://${language}.wikipedia.org/w/api.php`)
       url.search = new URLSearchParams({ action: 'query', format: 'json', origin: '*', list: 'search', srsearch: query, srlimit: '3', srprop: 'snippet' }).toString()
       try {
@@ -116,19 +116,18 @@ export class ConfigurableEntityLookup implements EntityLookupProvider {
     let last: EntityLookupResult = { source, status: 'missing' }
     for (const engine of engines) {
       const startedAt = performance.now()
-      const searchText = context.queryText?.trim() || source
-      const query = engine === 'wiki' ? [...context.gameNames ?? [], searchText].filter(Boolean).join(' · ') : buildEntitySearchQuery(searchText, context.gameNames ?? [])
+      const query = engine === 'wiki' ? [...context.gameNames ?? [], source].filter(Boolean).join(' · ') : buildEntitySearchQuery(source, context.gameNames ?? [])
       writeDiagnosticLog('搜索', '发起查询', `${source} · ${searchEngineLabel(engine)} · ${query}`, 'info')
       let result: EntityLookupResult
       try {
         result = engine === 'wiki'
           ? await this.wiki.lookup(source, context)
-          : await this.lookupWeb(engine, source, context.queryText, context.gameNames ?? [], searchEngineKey(settings, engine))
-        console.info('[entity-search]', { engine, source, queryText: context.queryText ?? source, durationMs: Math.round(performance.now() - startedAt), evidenceCount: result.research?.evidence.length ?? 0, status: result.status })
+          : await this.lookupWeb(engine, source, context.gameNames ?? [], searchEngineKey(settings, engine))
+        console.info('[entity-search]', { engine, source, durationMs: Math.round(performance.now() - startedAt), evidenceCount: result.research?.evidence.length ?? 0, status: result.status })
         const duration = Math.round(performance.now() - startedAt), evidence = result.research?.evidence.length ?? 0
         writeDiagnosticLog('搜索', result.status === 'learned' ? '查询并学习成功' : evidence ? '查询获得候选' : '查询无结果', `${source} · ${duration} ms${evidence ? ` · ${evidence} 条依据` : ''}`, result.status === 'learned' || evidence ? 'success' : 'warning')
       } catch (error) {
-        console.warn('[entity-search]', { engine, source, queryText: context.queryText ?? source, durationMs: Math.round(performance.now() - startedAt), status: 'error', error: error instanceof Error ? error.message : String(error) })
+        console.warn('[entity-search]', { engine, source, durationMs: Math.round(performance.now() - startedAt), status: 'error', error: error instanceof Error ? error.message : String(error) })
         writeDiagnosticLog('搜索', '查询失败', `${source} · ${error instanceof Error ? error.message : String(error)}`, 'error')
         result = { source, status: 'missing' }
       }
@@ -138,9 +137,9 @@ export class ConfigurableEntityLookup implements EntityLookupProvider {
     return last
   }
 
-  private async lookupWeb(engine: Exclude<EntitySearchEngineId, 'wiki'>, source: string, queryText: string | undefined, gameNames: readonly string[], apiKey: string): Promise<EntityLookupResult> {
+  private async lookupWeb(engine: Exclude<EntitySearchEngineId, 'wiki'>, source: string, gameNames: readonly string[], apiKey: string): Promise<EntityLookupResult> {
     if (!apiKey) return { source, status: 'missing' }
-    const query = buildEntitySearchQuery(queryText?.trim() || source, gameNames)
+    const query = buildEntitySearchQuery(source, gameNames)
     const hits = await this.web.search(engine, query, apiKey)
     if (!hits.length) return { source, status: 'missing' }
     return {
@@ -187,19 +186,19 @@ export class EntityLearningQueue {
       const normalized = typeof candidate === 'string' ? { source: candidate } : candidate
       return [normalizeMemoryText(normalized.source), normalized]
     })).values()].slice(0, 4)
-    const work = unique.map((candidate) => this.learn(candidate.source, gameId, gameNames, searchSettings, candidate.queryText))
+    const work = unique.map((candidate) => this.learn(candidate.source, gameId, gameNames, searchSettings))
     if (!work.length) return
     const settled = Promise.allSettled(work).then(() => undefined)
     if (timeoutMs <= 0) { await settled; return }
     await Promise.race([settled, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))])
   }
 
-  private learn(source: string, gameId: GameId, gameNames: readonly string[], searchSettings: EntitySearchSettings, queryText?: string) {
+  private learn(source: string, gameId: GameId, gameNames: readonly string[], searchSettings: EntitySearchSettings) {
     const key = `${gameId}\u0000${normalizeMemoryText(source)}`
-    if (!this.memory.needsEntityLookup(gameId, source, queryText)) return Promise.resolve()
+    if (!this.memory.needsEntityLookup(gameId, source)) return Promise.resolve()
     const existing = this.inFlight.get(key)
     if (existing) return existing
-    const task = this.provider.lookup(source, { gameNames, searchSettings, queryText })
+    const task = this.provider.lookup(source, { gameNames, searchSettings })
       .then((result) => this.memory.rememberEntity({ ...result, gameId, updatedAt: Date.now() }))
       .catch(() => undefined)
       .finally(() => this.inFlight.delete(key))

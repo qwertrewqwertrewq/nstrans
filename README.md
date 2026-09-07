@@ -2,11 +2,30 @@
 
 面向 macOS、Windows、Android 与 iPadOS 的实时日文 OCR 与翻译覆盖工具。业务界面与平台原生能力分层，桌面端均可离线运行 OCR 与翻译模型。
 
+## 平台实测状态
+
+| 平台 | 测试设备 | 当前状态 |
+|---|---|---|
+| macOS | Apple M4、16GB RAM | 运行良好；MeikiOCR 为默认引擎，也可切换 Apple Vision |
+| iPadOS | Apple M2、8GB RAM | 使用 TranslateGemma 4B IQ4_XS，运行效果尚可；当前提供未签名 IPA，需用户使用自己的证书自签 |
+| Android | Snapdragon 750G、8GB RAM、Android 11 | 仅验证应用能够打开；由于缺少更高性能 Android 设备，尚未验证实际 OCR、模型速度和长时间运行效果 |
+| Windows | Windows 10/11 x64 | 正在进行原生构建与实机验证；OCR 固定使用 MeikiOCR，翻译后端可选 CUDA、Vulkan 或 CPU |
+
+以上结论只代表列出的设备和当前 Alpha 构建，不构成对其他硬件性能、稳定性或兼容性的保证。
+
+## 隐私与版权边界
+
+- 视频画面、截图和完整 OCR 识别文本只在客户端即时处理，不上传至 NSTrans 社区服务器，服务器也不保存用户截取画面中的对白、剧情文本或画面内容。
+- 客户端本机只会为复用翻译而缓存符合限制的专有名词、单词和短菜单标签；不会建立视频、截图或长篇游戏文本档案。用户可以通过清除应用数据移除这些本地缓存。
+- “共享本地词库贡献”默认关闭。开启后仍只允许上传经过长度、结构和标点过滤的专有名词、单词与短句，不允许上传对白、描述或连续剧情文本。
+- 自动学习的专业词汇来自 Wikipedia、Wikidata 等公开可访问渠道，并保存来源链接；搜索候选只作为模型术语提示，不会把网页内容复制进游戏文本库。
+- NSTrans 不包含、托管或授权任何游戏画面、剧情文本、商标或其他游戏资产。相关权利归各自权利人所有；本项目与任天堂及其他游戏发行商、开发商无隶属或背书关系。
+
 ## 当前能力
 
 - 枚举并打开 USB 采集卡/摄像头（浏览器 `MediaDevices`）
 - 左侧 1/4 画面预览，支持扩大预览和系统全屏
-- macOS 开发版优先使用 Apache-2.0 的 meikiocr 游戏日文专用模型（常驻 ONNX 进程，热请求约 150 ms），不可用时回退 Apple Vision；其他平台暂回退 Tesseract.js
+- macOS 默认使用 Apache-2.0 的 MeikiOCR 游戏日文模型并可切换 Apple Vision；Windows 与 Android 使用 MeikiOCR；iPadOS 只使用 Apple Vision
 - Switch 游戏策略会保留相邻多行对话，并过滤 A/B/X/Y、L/R/ZL/ZR 操作提示、角落 HUD、小字号标签与假名注音碎片
 - 基于文字包围框模糊原文并覆盖译文
 - 分别显示采集、OCR、翻译、渲染和端到端延迟
@@ -82,6 +101,10 @@ npm run lint
 npm run build
 ```
 
+## Alpha 构建下载
+
+GitHub Releases 提供当前已构建的 macOS DMG、需要自签的 iPadOS IPA，以及未经性能验证的 Android arm64 APK。它们仅供测试，不代表正式发布质量；模型通常需要首次启动后另行下载或由用户选择本地文件。
+
 ## 目录结构
 
 ```text
@@ -111,8 +134,6 @@ src-tauri/                macOS/Windows/Android 共用原生壳层
 
 模型只通过 `TranslationRuntime` 接口被业务层调用，所以切换 GGUF、CUDA、DirectML 或 NNAPI 不会修改 OCR 管线和 UI 配置。
 
-## 下一阶段
+## 许可证与第三方项目
 
-1. 将 TranslateGemma 开发运行时封装为 Tauri sidecar，并为 Windows/Android 接入 GGUF 实现。
-2. 对相邻帧的文字框做跟踪与去抖，避免译文闪烁，并继续优化假名注音合并。
-3. 初始化并验证 Tauri Android 工程与 UVC 采集兼容性。
+NSTrans 自有源码采用 [Apache License 2.0](LICENSE)。项目使用或引用了 MeikiOCR、ONNX Runtime、llama.cpp、Ollama、Tauri、React、Tesseract.js、Lucide 等开源项目，并通过用户自行下载的方式使用 TranslateGemma。完整归属、许可证及模型条款见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。第三方组件与模型仍分别受其原始许可证或使用条款约束，NSTrans 的许可证不会覆盖它们。

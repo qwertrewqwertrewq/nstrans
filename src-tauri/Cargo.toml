@@ -3,8 +3,8 @@ name = "nstrans"
 version = "0.1.0"
 description = "Real-time Japanese OCR and translation overlay"
 authors = ["NSTrans contributors"]
-license = ""
-repository = ""
+license = "Apache-2.0"
+repository = "https://github.com/qwertrewqwertrewq/nstrans"
 edition = "2021"
 rust-version = "1.77.2"
 

@@ -72,9 +72,8 @@ export class TranslationRouter {
       const profile = getGameProfile(settings.gameId)
       const candidates = unresolved.flatMap(({ request }) => extractKatakanaCandidates(request.text)
         .flatMap((term) => this.dictionaries.unresolvedKatakanaParts(settings.gameId, term))
-        .filter((term) => !this.memory.matchLearnedEntity(settings.gameId, term))
-        .map((source) => ({ source, queryText: request.text })))
-      if (candidates.length) writeDiagnosticLog('搜索', '发现待查询片假名', [...new Set(candidates.map(({ source }) => source))].join('、'), 'info', 1_000)
+        .filter((term) => !this.memory.matchLearnedEntity(settings.gameId, term)))
+      if (candidates.length) writeDiagnosticLog('搜索', '发现待查询片假名', [...new Set(candidates)].join('、'), 'info', 1_000)
       await this.entityLearner?.resolve(candidates, settings.gameId, profile.searchNames, 13_000, settings.entitySearch)
     }
 

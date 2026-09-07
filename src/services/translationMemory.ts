@@ -74,12 +74,11 @@ export class TranslationMemory {
 
   entityStatus(game: GameId, source: string) { return this.entities.get(entityKey(game, source))?.status }
 
-  needsEntityLookup(game: GameId, source: string, queryText?: string) {
+  needsEntityLookup(game: GameId, source: string) {
     const entry = this.entities.get(entityKey(game, source))
     if (!entry || entry.status === 'missing') return true
     if (entry.status === 'learned') return false
-    if (!entry.research?.evidence.length) return true
-    return Boolean(queryText && !normalizeMemoryText(entry.research.query).includes(normalizeMemoryText(queryText)))
+    return !entry.research?.evidence.length
   }
 
   rememberEntity(entry: StoredEntity) {

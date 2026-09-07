@@ -24,7 +24,7 @@ describe('TranslationMemory', () => {
     expect(memory.matchLearnedEntity('zelda-totk', '曖昧名')).toBeUndefined()
   })
 
-  it('retries misses and empty research but keeps useful contextual research', () => {
+  it('retries misses and empty research but reuses useful term research', () => {
     const memory = new TranslationMemory()
     memory.rememberEntity({ gameId: 'zelda-totk', source: 'ジオシニオ', status: 'missing', updatedAt: 1 })
     expect(memory.needsEntityLookup('zelda-totk', 'ジオシニオ')).toBe(true)
@@ -32,7 +32,6 @@ describe('TranslationMemory', () => {
     expect(memory.needsEntityLookup('zelda-totk', 'ジオシニオ')).toBe(true)
     memory.rememberEntity({ gameId: 'zelda-totk', source: 'ジオシニオ', status: 'pending', research: { term: 'ジオシニオ', query: '王国之泪 ジオシニオ', evidence: ['候选资料'], sourceUrls: [] }, updatedAt: 3 })
     expect(memory.needsEntityLookup('zelda-totk', 'ジオシニオ')).toBe(false)
-    expect(memory.needsEntityLookup('zelda-totk', 'ジオシニオ', 'ジオシニオの祠')).toBe(true)
   })
 
   it('queues only short translations and learned terms after sharing consent', () => {

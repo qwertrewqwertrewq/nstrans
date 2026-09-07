@@ -79,7 +79,8 @@ describe('TranslationRouter', () => {
     const router = new TranslationRouter(runtime(calls), memory, new EntityLearningQueue(memory, provider), dictionaries)
     await router.translate([request('セーブ'), request('ジオシニオの祠')], defaultRoutingSettings)
     expect(provider.lookup).toHaveBeenCalledTimes(1)
-    expect(provider.lookup).toHaveBeenCalledWith('ジオシニオ', expect.objectContaining({ gameNames: expect.arrayContaining(['塞尔达传说 王国之泪']), queryText: 'ジオシニオの祠' }))
+    expect(provider.lookup).toHaveBeenCalledWith('ジオシニオ', expect.objectContaining({ gameNames: expect.arrayContaining(['塞尔达传说 王国之泪']) }))
+    expect(provider.lookup).not.toHaveBeenCalledWith('ジオシニオ', expect.objectContaining({ queryText: expect.anything() }))
   })
 
   it('passes contextual search evidence to TranslateGemma instead of treating it as a direct replacement', async () => {
