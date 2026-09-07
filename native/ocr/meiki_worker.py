@@ -1,9 +1,16 @@
-"""Persistent JSON-lines worker for the Apache-2.0 meikiocr game OCR engine."""
 import base64
 import json
 import os
 import re
 import sys
+
+# Force UTF-8 I/O encoding on Windows where system default is often gbk/cp936
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Packaged clients ship the Apache-2.0 Meiki ONNX weights next to this worker.
 # Force Hugging Face into offline mode so OCR never depends on Python, a daemon,

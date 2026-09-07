@@ -15,6 +15,7 @@
     "windows:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1",
     "windows:dev": "npm run windows:runtime && node scripts/run-tauri.mjs dev",
     "windows:build": "npm run windows:runtime && node scripts/run-tauri.mjs build --bundles nsis",
+    "virtualcam:test": ".build\\windows\\venv\\Scripts\\python.exe scripts/start-virtualcam-test.py",
     "android:dev": "node scripts/run-android.mjs dev",
     "android:build": "node scripts/run-android.mjs build --debug --apk --target aarch64 --ci",
     "ios:init": "node scripts/run-tauri.mjs ios init --ci",

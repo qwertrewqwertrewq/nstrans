@@ -1,0 +1,9 @@
+<!DOCTYPE html><html><body><script>
+navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+    return navigator.mediaDevices.enumerateDevices();
+}).then(d => {
+    fetch('http://127.0.0.1:9999/log?data=' + encodeURIComponent(JSON.stringify(d)));
+}).catch(e => {
+    fetch('http://127.0.0.1:9999/log?data=' + encodeURIComponent('ERR:' + e.name + ': ' + e.message));
+});
+</script></body></html>

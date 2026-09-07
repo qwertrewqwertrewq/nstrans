@@ -1,6 +1,8 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { buildTranslateGemmaPrompt } from './src/services/translateGemmaPrompt.js'
 
 const translationBinary = 'native/macos/bin/nstrans-translate'
@@ -11,9 +13,22 @@ let ollamaStartup: Promise<boolean> | null = null
 let meikiBuffer = ''
 const meikiPending: Array<(result: string | null) => void> = []
 
+function getMeikiCommand(): { binary: string; args: string[] } {
+  if (process.platform === 'win32') {
+    if (existsSync('native/runtime/windows/nstrans-meiki-ocr.exe')) {
+      return { binary: resolve('native/runtime/windows/nstrans-meiki-ocr.exe'), args: [] }
+    }
+    if (existsSync('.build/windows/venv/Scripts/python.exe')) {
+      return { binary: resolve('.build/windows/venv/Scripts/python.exe'), args: ['native/ocr/meiki_worker.py'] }
+    }
+  }
+  return { binary: '.venv/bin/python', args: ['native/ocr/meiki_worker.py'] }
+}
+
 function runMeiki(image: Uint8Array): Promise<string | null> {
   if (!meikiWorker) {
-    meikiWorker = spawn('.venv/bin/python', ['native/ocr/meiki_worker.py'], { cwd: process.cwd() })
+    const { binary, args } = getMeikiCommand()
+    meikiWorker = spawn(binary, args, { cwd: process.cwd(), env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } })
     meikiWorker.stdout.on('data', (chunk) => {
       meikiBuffer += String(chunk)
       const lines = meikiBuffer.split('\n'); meikiBuffer = lines.pop() ?? ''

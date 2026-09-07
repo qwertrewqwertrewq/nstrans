@@ -599,6 +599,8 @@ fn ensure_meiki_process(app: &AppHandle, guard: &mut Option<MeikiProcess>) -> Re
   if guard.as_mut().and_then(|process| process.child.try_wait().ok()).flatten().is_some() { *guard = None; }
   if guard.is_none() {
     let mut command = Command::new(meiki_binary(app)?);
+    command.env("PYTHONIOENCODING", "utf-8");
+    command.env("PYTHONUTF8", "1");
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     isolate_process(&mut command);
     let mut child = command.spawn().map_err(|error| format!("无法启动 MeikiOCR：{error}"))?;

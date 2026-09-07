@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Camera Test</title></head>
+<body>
+<h1>Camera Enumeration Test</h1>
+<button id="btn">Request Camera Permission</button>
+<pre id="output">Detecting...</pre>
+<video id="vid" autoplay playsinline style="width: 640px; height: 360px; border: 1px solid red;"></video>
+<script>
+async function check() {
+  const out = document.getElementById('output');
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+    out.textContent = 'All devices:\n' + JSON.stringify(devices, null, 2) + '\n\nVideo devices:\n' + JSON.stringify(videoDevices, null, 2);
+  } catch(e) {
+    out.textContent = 'Error: ' + e;
+  }
+}
+document.getElementById('btn').onclick = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    document.getElementById('vid').srcObject = stream;
+    await check();
+  } catch(e) {
+    document.getElementById('output').textContent += '\ngetUserMedia error: ' + e;
+  }
+};
+check();
+</script>
+</body>
+</html>
