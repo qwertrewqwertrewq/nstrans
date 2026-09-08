@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 
-if (process.platform === 'darwin') {
+if (process.platform === 'darwin' && process.env.NSTRANS_SKIP_MAC_HELPERS !== '1') {
   mkdirSync('native/macos/bin', { recursive: true })
   const targets = [
     { source: 'native/macos/TranslationCLI.swift', output: 'native/macos/bin/nstrans-translate', frameworks: ['Translation'] },
