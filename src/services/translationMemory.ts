@@ -18,10 +18,13 @@ export type StoredTranslation = {
 export type StoredEntity = {
   gameId: GameId
   source: string
+  canonicalSource?: string
   target?: string
   status: 'learned' | 'pending' | 'missing'
   sourceUrl?: string
   research?: TerminologyResearch
+  origin?: 'remote' | 'search' | 'ocr-fallback'
+  manuallyEdited?: boolean
   updatedAt: number
 }
 type MemoryData = { version: 2; translations: StoredTranslation[]; entities: StoredEntity[] }
@@ -47,11 +50,11 @@ export class TranslationMemory {
       const parsed = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null') as MemoryData | LegacyMemoryData | null
       if (parsed?.version === 2) {
         parsed.translations.filter(isReusableTranslation).forEach((entry) => this.translations.set(translationKey(entry.gameId, entry.sourceLanguage, entry.targetLanguage, entry.source), entry))
-        parsed.entities.forEach((entry) => this.entities.set(entityKey(entry.gameId, entry.source), entry))
-        if (this.translations.size !== parsed.translations.length) this.persist()
+        parsed.entities.filter(isReusableEntity).forEach((entry) => this.entities.set(entityKey(entry.gameId, entry.source), entry))
+        if (this.translations.size !== parsed.translations.length || this.entities.size !== parsed.entities.length) this.persist()
       } else if (parsed?.version === 1) {
         parsed.translations.forEach(({ gameAdapterId, ...entry }) => { const migrated = { ...entry, gameId: migrateGameId(gameAdapterId) }; if (isReusableTranslation(migrated)) this.translations.set(translationKey(migrated.gameId, migrated.sourceLanguage, migrated.targetLanguage, migrated.source), migrated) })
-        parsed.entities.forEach(({ gameAdapterId, ...entry }) => { const migrated = { ...entry, gameId: migrateGameId(gameAdapterId) }; this.entities.set(entityKey(migrated.gameId, migrated.source), migrated) })
+        parsed.entities.forEach(({ gameAdapterId, ...entry }) => { const migrated = { ...entry, gameId: migrateGameId(gameAdapterId) }; if (isReusableEntity(migrated)) this.entities.set(entityKey(migrated.gameId, migrated.source), migrated) })
         this.persist()
       }
     } catch { /* Ignore corrupt or unavailable platform storage. */ }
@@ -73,6 +76,17 @@ export class TranslationMemory {
   }
 
   entityStatus(game: GameId, source: string) { return this.entities.get(entityKey(game, source))?.status }
+  entity(game: GameId, source: string) { return this.entities.get(entityKey(game, source)) }
+
+  hasEntityKnowledge(game: GameId, source: string) {
+    const entry = this.entities.get(entityKey(game, source))
+    return entry?.status === 'learned' || Boolean(entry?.research?.evidence.length)
+  }
+
+  entityLookupWasEmpty(game: GameId, source: string) {
+    const entry = this.entities.get(entityKey(game, source))
+    return Boolean(entry) && entry?.status !== 'learned' && !entry?.research?.evidence.length
+  }
 
   needsEntityLookup(game: GameId, source: string) {
     const entry = this.entities.get(entityKey(game, source))
@@ -81,9 +95,9 @@ export class TranslationMemory {
     return !entry.research?.evidence.length
   }
 
-  rememberEntity(entry: StoredEntity) {
+  rememberEntity(entry: StoredEntity, share = true) {
     this.entities.set(entityKey(entry.gameId, entry.source), entry)
-    if (entry.status === 'learned' && entry.target) this.contributions?.enqueue({ gameId: entry.gameId, kind: 'term', source: entry.source, target: entry.target, provenance: 'wikimedia', sourceUrl: entry.sourceUrl })
+    if (share && entry.status === 'learned' && entry.target) this.contributions?.enqueue({ gameId: entry.gameId, kind: 'term', source: entry.source, target: entry.target, provenance: 'wikimedia', sourceUrl: entry.sourceUrl })
     this.persist()
   }
 
@@ -92,10 +106,35 @@ export class TranslationMemory {
     return entry?.status === 'learned' && entry.target ? { source: entry.source, target: entry.target, category: 'learned' } : undefined
   }
 
+  matchManualEntity(game: GameId, source: string): GlossaryEntry | undefined {
+    const entry = this.entities.get(entityKey(game, source))
+    return entry?.status === 'learned' && entry.target && entry.manuallyEdited ? { source: entry.source, target: entry.target, category: 'learned' } : undefined
+  }
+
+  entitiesForText(game: GameId, text: string) {
+    const normalized = normalizeMemoryText(text)
+    return [...this.entities.values()].filter((entry) => entry.gameId === game && normalized.includes(normalizeMemoryText(entry.source)))
+  }
+
+  editEntity(game: GameId, oldSource: string, source: string, target: string, origin: StoredEntity['origin']) {
+    const cleanedSource = source.trim(), cleanedTarget = target.trim()
+    if (!cleanedSource || !cleanedTarget) throw new Error('原文和翻译不能为空')
+    this.entities.delete(entityKey(game, oldSource))
+    this.rememberEntity({ gameId: game, source: cleanedSource, target: cleanedTarget, status: 'learned', origin, manuallyEdited: true, updatedAt: Date.now() }, false)
+  }
+
   findLearnedTerms(game: GameId, texts: readonly string[], limit = 24): GlossaryEntry[] {
     const normalizedTexts = texts.map(normalizeMemoryText)
     return [...this.entities.values()]
       .filter((entry) => entry.gameId === game && entry.status === 'learned' && entry.target && normalizedTexts.some((text) => text.includes(normalizeMemoryText(entry.source))))
+      .slice(0, limit)
+      .map((entry) => ({ source: entry.source, target: entry.target!, category: 'learned' }))
+  }
+
+  findManualTerms(game: GameId, texts: readonly string[], limit = 24): GlossaryEntry[] {
+    const normalizedTexts = texts.map(normalizeMemoryText)
+    return [...this.entities.values()]
+      .filter((entry) => entry.gameId === game && entry.manuallyEdited && entry.status === 'learned' && entry.target && normalizedTexts.some((text) => text.includes(normalizeMemoryText(entry.source))))
       .slice(0, limit)
       .map((entry) => ({ source: entry.source, target: entry.target!, category: 'learned' }))
   }
@@ -125,6 +164,16 @@ function isReusableTranslation(entry: Pick<StoredTranslation, 'source' | 'target
   return [...compactSource].length <= 32
     && isLikelyStandaloneLabel(entry.source)
     && /[\p{Script=Katakana}ー・]{2,}/u.test(entry.source)
+}
+
+function isReusableEntity(entry: Pick<StoredEntity, 'source' | 'target' | 'status'>) {
+  if (entry.status !== 'learned') return true
+  if (!entry.target?.trim()) return false
+  // Learned OCR aliases may legitimately look like Han characters (世儿夕),
+  // but controller glyphs, ASCII button labels and punctuation-only mappings
+  // are not Japanese terminology and must not survive migration.
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(entry.source)
+    && !/^[\p{P}\p{S}\s]+$/u.test(entry.target)
 }
 
 export function browserTranslationMemory(contributions?: CommunityContributionQueue) {

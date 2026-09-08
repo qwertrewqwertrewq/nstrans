@@ -317,11 +317,13 @@ async function dictionary(env, gameId) {
     SELECT t.source_text,tr.target_text,t.kind,tr.score,tr.updated_at,
     ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY tr.score DESC,tr.updated_at DESC) rank
     FROM terms t JOIN translations tr ON tr.term_id=t.id WHERE t.game_id=?) WHERE rank=1 ORDER BY source_text`).bind(gameId).all()
-  const versionRow = await env.DB.prepare("SELECT COALESCE(MAX(updated_at),'0') version FROM terms WHERE game_id=?").bind(gameId).first()
+  const versionRow = await env.DB.prepare(`SELECT COALESCE(MAX(t.updated_at),'0') term_version,COALESCE(MAX(tr.updated_at),'0') translation_version,
+    COUNT(tr.id) translation_count,COALESCE(SUM(tr.id),0) translation_ids,COALESCE(SUM(tr.id*tr.score),0) score_fingerprint
+    FROM terms t LEFT JOIN translations tr ON tr.term_id=t.id WHERE t.game_id=?`).bind(gameId).first()
   const safeResults = results.filter((row) => !containsJapaneseKana(row.target_text) && !containsDictionaryPunctuation(row.source_text) && !containsDictionaryPunctuation(row.target_text))
   const exclusionRows = gameId === 'general' ? await env.DB.prepare('SELECT source_text FROM search_exclusions WHERE game_id=? ORDER BY source_text').bind(gameId).all() : { results: [] }
   const exclusionVersion = gameId === 'general' ? await env.DB.prepare("SELECT COALESCE(MAX(updated_at),'0') version FROM search_exclusions WHERE game_id=?").bind(gameId).first() : { version: '0' }
-  const dictionaryVersion = `${versionRow.version}-${exclusionVersion?.version ?? '0'}-katakana-search-v4`
+  const dictionaryVersion = `${versionRow.term_version}-${versionRow.translation_version}-${versionRow.translation_count}-${versionRow.translation_ids}-${versionRow.score_fingerprint}-${exclusionVersion?.version ?? '0'}-katakana-search-v5`
   const response = json({ schemaVersion: 1, gameId, version: dictionaryVersion, license: env.LICENSE_NAME, entries: safeResults.map((row) => ({ source: row.source_text, target: row.target_text, category: row.kind === 'phrase' ? 'ui' : 'learned', score: row.score })), searchExclusions: exclusionRows.results.map((row) => row.source_text) })
   response.headers.set('cache-control', 'public,max-age=60'); response.headers.set('etag', `W/"${gameId}-${dictionaryVersion}-${safeResults.length}"`)
   return cors(response)

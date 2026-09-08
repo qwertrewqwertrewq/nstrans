@@ -4,6 +4,8 @@ import type { TranslationRequest } from './translator'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { buildTranslateGemmaBatchPrompt, buildTranslateGemmaPrompt } from './translateGemmaPrompt'
 import { writeDiagnosticLog } from './diagnosticLog'
+import { qwenTranslateMany } from './qwenFlash'
+import type { RemoteModelCapability } from './entitySearchSettings'
 
 export type ConversationTurn = { sources: string[]; translations: string[] }
 export type TerminologyResearch = { term: string; query: string; evidence: string[]; sourceUrls: string[] }
@@ -15,6 +17,7 @@ export type RuntimeRequest = {
   glossary?: GlossaryEntry[]
   research?: TerminologyResearch[]
   correction?: string
+  remoteModel?: { apiKey: string; model: string; endpoint?: string; capability: RemoteModelCapability }
 }
 export interface TranslationRuntime {
   id: TranslationEngineId
@@ -94,8 +97,21 @@ const translateGemmaRuntime: TranslationRuntime = {
   },
 }
 
+const remoteLlmRuntime: TranslationRuntime = {
+  id: 'remote-llm', label: '远程 LLM', available: async () => true,
+  translateMany: async ({ requests, history, glossary, correction, remoteModel }) => {
+    if (!remoteModel?.apiKey) throw new Error('远程核心模型缺少 API Key')
+    const startedAt = performance.now()
+    writeDiagnosticLog('LLM', '发送远程翻译请求', `${remoteModel.model} · ${requests.length} 条 · 上下文 ${history?.length ?? 0} 轮 · 术语 ${glossary?.length ?? 0} 条`, 'info')
+    const translations = await qwenTranslateMany({ texts: requests.map(({ text }) => text), history, glossary, correction, ...remoteModel })
+    writeDiagnosticLog('LLM', '远程翻译响应', `${remoteModel.model} · ${translations.length} 条 · ${Math.round(performance.now() - startedAt)} ms`, 'success')
+    return translations
+  },
+}
+
 export const translationRuntimes: Record<TranslationEngineId, TranslationRuntime> = {
   translategemma: translateGemmaRuntime,
+  'remote-llm': remoteLlmRuntime,
 }
 
 export async function translationRuntimeStatus() {

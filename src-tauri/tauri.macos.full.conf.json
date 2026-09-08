@@ -1,9 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
-    "targets": ["nsis"],
     "resources": {
-      "../native/runtime/windows/nstrans-meiki-ocr.exe": "runtime/nstrans-meiki-ocr.exe"
+      "../native/runtime/macos/nstrans-llama": "runtime/nstrans-llama"
     }
   }
 }

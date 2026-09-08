@@ -41,6 +41,38 @@ export class HttpContributionUploader implements ContributionUploader {
   }
 }
 
+export class CommunityDictionaryEditor {
+  private readonly baseUrl: string
+  private readonly apiKey: string
+  constructor(baseUrl: string, apiKey: string) { this.baseUrl = baseUrl.replace(/\/$/u, ''); this.apiKey = apiKey.trim() }
+
+  async editOrCreate(input: { gameId: GameId; oldSource: string; oldTarget: string; source: string; target: string }) {
+    if (!this.apiKey) throw new Error('客户端 API Key 为空')
+    const headers = { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' }
+    const dictionaryResponse = await fetch(`${this.baseUrl}/api/v1/dictionaries/batch`, { method: 'POST', headers, body: JSON.stringify({ gameIds: [input.gameId] }) })
+    const dictionaryBody = await dictionaryResponse.json() as { dictionaries?: Record<string, Array<{ translationId: number; source: string; target: string }>>; error?: string }
+    if (!dictionaryResponse.ok) throw new Error(dictionaryBody.error || `社区词库读取失败 (${dictionaryResponse.status})`)
+    const records = dictionaryBody.dictionaries?.[input.gameId] ?? []
+    const existing = records.find((entry) => normalizeContributionText(entry.source) === normalizeContributionText(input.oldSource) && normalizeContributionText(entry.target) === normalizeContributionText(input.oldTarget))
+      ?? records.find((entry) => normalizeContributionText(entry.source) === normalizeContributionText(input.oldSource))
+    const endpoint = existing ? `${this.baseUrl}/api/v1/translations/${existing.translationId}` : `${this.baseUrl}/api/v1/translations`
+    const response = await fetch(endpoint, { method: existing ? 'PATCH' : 'POST', headers, body: JSON.stringify(existing ? { source: input.source, target: input.target } : { gameId: input.gameId, kind: 'term', source: input.source, target: input.target }) })
+    const body = await response.json() as { score?: number; scoreDelta?: number; unchanged?: boolean; error?: string }
+    if (!response.ok) throw new Error(body.error || `社区词库写入失败 (${response.status})`)
+    return { created: !existing, score: body.score, scoreDelta: body.unchanged ? 0 : body.scoreDelta ?? 1 }
+  }
+
+  async createAlternative(input: { gameId: GameId; source: string; target: string }) {
+    if (!this.apiKey) throw new Error('客户端 API Key 为空')
+    const response = await fetch(`${this.baseUrl}/api/v1/translations`, { method: 'POST', headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ ...input, kind: 'term' }) })
+    const body = await response.json() as { score?: number; scoreDelta?: number; unchanged?: boolean; error?: string }
+    if (!response.ok) throw new Error(body.error || `社区候选译名写入失败 (${response.status})`)
+    return { score: body.score, scoreDelta: body.unchanged ? 0 : body.scoreDelta ?? 1, unchanged: body.unchanged === true }
+  }
+}
+
+const normalizeContributionText = (value: string) => value.normalize('NFKC').replace(/\s+/gu, '').trim()
+
 const SETTINGS_KEY = 'yomilens.knowledge-sharing.enabled.v1'
 const QUEUE_KEY = 'yomilens.knowledge-sharing.queue.v1'
 

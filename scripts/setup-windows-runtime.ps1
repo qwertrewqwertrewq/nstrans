@@ -1,6 +1,7 @@
 param(
   [string]$OllamaVersion = "",
-  [switch]$Force
+  [switch]$Force,
+  [switch]$NoLlama
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,7 +44,7 @@ if ($Force -or -not (Test-Path $MeikiExe)) {
 }
 
 $OllamaLib = Join-Path $Runtime "lib\ollama"
-if ($Force -or -not (Test-Path $LlamaExe) -or -not (Test-Path $OllamaLib)) {
+if (-not $NoLlama -and ($Force -or -not (Test-Path $LlamaExe) -or -not (Test-Path $OllamaLib))) {
   $Archive = Join-Path $Build "ollama-windows-amd64.zip"
   $Extracted = Join-Path $Build "ollama"
   $Base = if ($OllamaVersion) { "https://github.com/ollama/ollama/releases/download/v$OllamaVersion" } else { "https://github.com/ollama/ollama/releases/latest/download" }
@@ -59,7 +60,7 @@ if ($Force -or -not (Test-Path $LlamaExe) -or -not (Test-Path $OllamaLib)) {
   Copy-Item $DownloadedLib (Join-Path $Runtime "lib") -Recurse -Force
 }
 
-if (-not (Test-Path $MeikiExe) -or -not (Test-Path $LlamaExe) -or -not (Test-Path $OllamaLib)) {
+if (-not (Test-Path $MeikiExe) -or (-not $NoLlama -and (-not (Test-Path $LlamaExe) -or -not (Test-Path $OllamaLib)))) {
   throw "Windows runtime validation failed."
 }
 Write-Host "Windows runtime ready: $Runtime"

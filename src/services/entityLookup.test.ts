@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildEntitySearchQuery, ConfigurableEntityLookup, extractEntityCandidates, WikimediaEntityLookup } from './entityLookup'
+import { buildEntitySearchQuery, ConfigurableEntityLookup, EntityLearningQueue, extractEntityCandidates, WikimediaEntityLookup } from './entityLookup'
+import { TranslationMemory } from './translationMemory'
+import { defaultEntitySearchSettings } from './entitySearchSettings'
 
 describe('entity lookup', () => {
   it('builds every web query with the selected game name and source term', () => {
@@ -11,7 +13,7 @@ describe('entity lookup', () => {
     const web = { search: vi.fn(async () => [{ title: '地名资料', url: 'https://example.com/location', snippet: 'チナガレ湿地帯的中文名称' }]) }
     const result = await new ConfigurableEntityLookup(wiki, web).lookup('チナガレ', {
       gameNames: ['塞尔达传说 王国之泪'],
-      searchSettings: { primary: 'brave', fallback: 'none', qianfanApiKey: '', braveApiKey: 'key' },
+      searchSettings: { ...defaultEntitySearchSettings, primary: 'brave', fallback: 'none', braveApiKey: 'key' },
     })
     expect(web.search).toHaveBeenCalledWith('brave', '塞尔达传说 王国之泪 "チナガレ" 中文 译名', 'key')
     expect(result.research).toMatchObject({ term: 'チナガレ', query: '塞尔达传说 王国之泪 "チナガレ" 中文 译名' })
@@ -22,7 +24,7 @@ describe('entity lookup', () => {
     const web = { search: vi.fn(async (engine: string) => engine === 'qianfan' ? [] : [{ title: '地名表', url: 'https://example.com/term', snippet: 'グチニザ对应古奇尼扎' }]) }
     const result = await new ConfigurableEntityLookup(wiki, web).lookup('グチニザ', {
       gameNames: ['塞尔达传说 王国之泪'],
-      searchSettings: { primary: 'qianfan', fallback: 'brave', qianfanApiKey: 'q-key', braveApiKey: 'b-key' },
+      searchSettings: { ...defaultEntitySearchSettings, primary: 'qianfan', fallback: 'brave', qianfanApiKey: 'q-key', braveApiKey: 'b-key' },
     })
     expect(web.search).toHaveBeenNthCalledWith(1, 'qianfan', '塞尔达传说 王国之泪 "グチニザ" 中文 译名', 'q-key')
     expect(web.search).toHaveBeenNthCalledWith(2, 'brave', '塞尔达传说 王国之泪 "グチニザ" 中文 译名', 'b-key')
@@ -35,7 +37,7 @@ describe('entity lookup', () => {
     const web = { search: vi.fn(async () => [{ title: '结果', url: 'https://example.com', snippet: '候选译名' }]) }
     const result = await new ConfigurableEntityLookup(wiki, web).lookup('テスト', {
       gameNames: ['测试游戏'],
-      searchSettings: { primary: 'wiki', fallback: 'brave', qianfanApiKey: '', braveApiKey: 'key' },
+      searchSettings: { ...defaultEntitySearchSettings, primary: 'wiki', fallback: 'brave', braveApiKey: 'key' },
     })
     expect(result.research?.evidence).toEqual(['结果: 候选译名'])
     expect(web.search).toHaveBeenCalledOnce()
@@ -44,6 +46,14 @@ describe('entity lookup', () => {
   it('extracts only katakana candidates from labels and dialogue', () => {
     expect(extractEntityCandidates('西ハイラル平原')).toEqual(['ハイラル'])
     expect(extractEntityCandidates('プルアがこちらへ来ました。')).toContain('プルア')
+  })
+
+  it('stores both an OCR spelling and the canonical spelling returned by a model lookup', async () => {
+    const memory = new TranslationMemory()
+    const provider = { lookup: vi.fn(async () => ({ source: '世儿夕', canonicalSource: 'ゼルダ', target: '塞尔达', status: 'learned' as const })) }
+    await new EntityLearningQueue(memory, provider).resolve(['世儿夕'], 'zelda-totk', [], 0)
+    expect(memory.matchLearnedEntity('zelda-totk', '世儿夕')?.target).toBe('塞尔达')
+    expect(memory.matchLearnedEntity('zelda-totk', 'ゼルダ')?.target).toBe('塞尔达')
   })
 
   it('learns only an exact Japanese title with a Chinese language link', async () => {

@@ -8,7 +8,8 @@ const root = resolve(import.meta.dirname, '..')
 const config = JSON.parse(readFileSync(resolve(root, 'src-tauri/tauri.conf.json'), 'utf8'))
 const app = resolve(root, 'src-tauri/target/release/bundle/macos/NSTrans.app')
 const architecture = process.arch === 'arm64' ? 'aarch64' : process.arch
-const dmg = resolve(root, `src-tauri/target/release/bundle/dmg/NSTrans_${config.version}_${architecture}.dmg`)
+const flavor = process.argv.includes('--remote-only') ? '_remote-only' : ''
+const dmg = resolve(root, `src-tauri/target/release/bundle/dmg/NSTrans_${config.version}_${architecture}${flavor}.dmg`)
 
 if (!existsSync(app)) throw new Error(`找不到 macOS 应用：${app}`)
 mkdirSync(dirname(dmg), { recursive: true })

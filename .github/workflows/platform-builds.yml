@@ -1,0 +1,193 @@
+name: Cross-platform builds
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OLLAMA_VERSION: 0.12.3
+
+jobs:
+  macos:
+    name: macOS · WithLlama + RemoteOnly
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install dependencies and native runtimes
+        run: |
+          npm ci --ignore-scripts
+          ./scripts/setup-macos-runtime.sh "$OLLAMA_VERSION"
+      - name: Build WithLlama DMG
+        run: |
+          npm run desktop:build:full
+          mkdir -p artifacts/WithLlama
+          cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64.dmg artifacts/WithLlama/NSTrans-macOS-arm64-WithLlama.dmg
+      - name: Build RemoteOnly DMG
+        run: |
+          npm run desktop:build:remote
+          mkdir -p artifacts/RemoteOnly
+          cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64_remote-only.dmg artifacts/RemoteOnly/NSTrans-macOS-arm64-RemoteOnly.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-macOS-arm64-WithLlama
+          path: artifacts/WithLlama/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-macOS-arm64-RemoteOnly
+          path: artifacts/RemoteOnly/*
+          if-no-files-found: error
+
+  ipados:
+    name: iPadOS · WithLlama + RemoteOnly
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - name: Set up Rust for iOS
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-ios
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build WithLlama unsigned IPA
+        run: |
+          npm run ios:build:with-llama
+          mkdir -p artifacts/WithLlama
+          cp src-tauri/gen/apple/build/arm64/NSTrans.ipa artifacts/WithLlama/NSTrans-iPadOS-arm64-unsigned-WithLlama.ipa
+      - name: Build RemoteOnly unsigned IPA
+        run: |
+          npm run ios:build:remote
+          mkdir -p artifacts/RemoteOnly
+          cp src-tauri/gen/apple/build/arm64/NSTrans.ipa artifacts/RemoteOnly/NSTrans-iPadOS-arm64-unsigned-RemoteOnly.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-iPadOS-arm64-unsigned-WithLlama
+          path: artifacts/WithLlama/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-iPadOS-arm64-unsigned-RemoteOnly
+          path: artifacts/RemoteOnly/*
+          if-no-files-found: error
+
+  android:
+    name: Android · WithLlama + RemoteOnly
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Android SDK and Rust
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build WithLlama APK
+        run: |
+          npm run android:build:with-llama
+          mkdir -p artifacts/WithLlama
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/WithLlama/NSTrans-Android-arm64-debug-WithLlama.apk
+      - name: Build RemoteOnly APK
+        run: |
+          npm run android:build:remote
+          mkdir -p artifacts/RemoteOnly
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/RemoteOnly/NSTrans-Android-arm64-debug-RemoteOnly.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-Android-arm64-debug-WithLlama
+          path: artifacts/WithLlama/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-Android-arm64-debug-RemoteOnly
+          path: artifacts/RemoteOnly/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows · WithLlama + RemoteOnly
+    runs-on: windows-latest
+    timeout-minutes: 210
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install dependencies and native runtimes
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:OLLAMA_VERSION
+      - name: Build WithLlama installer
+        shell: pwsh
+        run: |
+          npm run windows:build:full
+          New-Item -ItemType Directory -Force artifacts/WithLlama | Out-Null
+          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          Copy-Item $Source.FullName artifacts/WithLlama/NSTrans-Windows-x64-WithLlama-setup.exe
+      - name: Build RemoteOnly installer
+        shell: pwsh
+        run: |
+          npm run windows:build:remote
+          New-Item -ItemType Directory -Force artifacts/RemoteOnly | Out-Null
+          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          Copy-Item $Source.FullName artifacts/RemoteOnly/NSTrans-Windows-x64-RemoteOnly-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-Windows-x64-WithLlama
+          path: artifacts/WithLlama/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-Windows-x64-RemoteOnly
+          path: artifacts/RemoteOnly/*
+          if-no-files-found: error

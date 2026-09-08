@@ -4,7 +4,6 @@
     "resources": {
       "../native/macos/bin/nstrans-translate": "bin/nstrans-translate",
       "../native/macos/bin/nstrans-vision-ocr": "bin/nstrans-vision-ocr",
-      "../native/runtime/macos/nstrans-llama": "runtime/nstrans-llama",
       "../native/runtime/macos/nstrans-meiki-ocr": "runtime/nstrans-meiki-ocr"
     }
   }

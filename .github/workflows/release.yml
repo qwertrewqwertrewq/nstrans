@@ -47,7 +47,7 @@ jobs:
           fi
 
   macos:
-    name: macOS Apple Silicon DMG
+    name: macOS · WithLlama + RemoteOnly
     needs: prepare
     runs-on: macos-15
     timeout-minutes: 120
@@ -80,16 +80,16 @@ jobs:
           npm ci --ignore-scripts
           ./scripts/setup-macos-runtime.sh "$OLLAMA_VERSION"
 
-      - name: Build DMG
-        run: npm run desktop:build
-
-      - name: Stage release assets
+      - name: Build and stage both DMGs
         shell: bash
         run: |
           mkdir -p release-assets
-          cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64.dmg "release-assets/NSTrans-${RELEASE_TAG#v}-macOS-arm64.dmg"
+          npm run desktop:build:full
+          cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64.dmg "release-assets/NSTrans-${RELEASE_TAG#v}-macOS-arm64-WithLlama.dmg"
+          npm run desktop:build:remote
+          cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64_remote-only.dmg "release-assets/NSTrans-${RELEASE_TAG#v}-macOS-arm64-RemoteOnly.dmg"
           cd release-assets
-          shasum -a 256 "NSTrans-${RELEASE_TAG#v}-macOS-arm64.dmg" > "NSTrans-${RELEASE_TAG#v}-macOS-arm64.dmg.sha256"
+          for file in *.dmg; do shasum -a 256 "$file" > "$file.sha256"; done
 
       - name: Upload macOS assets
         env:
@@ -97,7 +97,7 @@ jobs:
         run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
 
   ipados:
-    name: iPadOS unsigned IPA
+    name: iPadOS · WithLlama + RemoteOnly
     needs: prepare
     runs-on: macos-15
     timeout-minutes: 90
@@ -120,19 +120,20 @@ jobs:
           rustup default stable
           rustup target add aarch64-apple-ios
 
-      - name: Install dependencies and build IPA
+      - name: Install dependencies
         shell: bash
-        run: |
-          npm ci --ignore-scripts
-          npm run ios:build
+        run: npm ci --ignore-scripts
 
-      - name: Stage release assets
+      - name: Build and stage both unsigned IPAs
         shell: bash
         run: |
           mkdir -p release-assets
-          cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-unsigned.ipa"
+          npm run ios:build:with-llama
+          cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-arm64-unsigned-WithLlama.ipa"
+          npm run ios:build:remote
+          cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-arm64-unsigned-RemoteOnly.ipa"
           cd release-assets
-          shasum -a 256 "NSTrans-${RELEASE_TAG#v}-iPadOS-unsigned.ipa" > "NSTrans-${RELEASE_TAG#v}-iPadOS-unsigned.ipa.sha256"
+          for file in *.ipa; do shasum -a 256 "$file" > "$file.sha256"; done
 
       - name: Upload iPadOS assets
         env:
@@ -140,7 +141,7 @@ jobs:
         run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
 
   android:
-    name: Android arm64 debug APK
+    name: Android · WithLlama + RemoteOnly
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -175,19 +176,20 @@ jobs:
           rustup default stable
           rustup target add aarch64-linux-android
 
-      - name: Install dependencies and build APK
+      - name: Install dependencies
         shell: bash
-        run: |
-          npm ci --ignore-scripts
-          npm run android:build
+        run: npm ci --ignore-scripts
 
-      - name: Stage release assets
+      - name: Build and stage both APKs
         shell: bash
         run: |
           mkdir -p release-assets
-          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug.apk"
+          npm run android:build:with-llama
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk"
+          npm run android:build:remote
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-RemoteOnly.apk"
           cd release-assets
-          sha256sum "NSTrans-${RELEASE_TAG#v}-Android-arm64-debug.apk" > "NSTrans-${RELEASE_TAG#v}-Android-arm64-debug.apk.sha256"
+          for file in *.apk; do sha256sum "$file" > "$file.sha256"; done
 
       - name: Upload Android assets
         env:
@@ -195,7 +197,7 @@ jobs:
         run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
 
   windows:
-    name: Windows x64 NSIS installer
+    name: Windows · WithLlama + RemoteOnly
     needs: prepare
     runs-on: windows-latest
     timeout-minutes: 180
@@ -228,19 +230,21 @@ jobs:
           npm ci --ignore-scripts
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:OLLAMA_VERSION
 
-      - name: Build NSIS installer
-        run: npm run windows:build
-
-      - name: Stage release assets
+      - name: Build and stage both NSIS installers
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release-assets | Out-Null
           $Version = $env:RELEASE_TAG.TrimStart('v')
+          npm run windows:build:full
           $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
-          $Target = "release-assets/NSTrans-$Version-Windows-x64-setup.exe"
-          Copy-Item $Source.FullName $Target
-          $Hash = (Get-FileHash $Target -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$Hash  $(Split-Path $Target -Leaf)" | Set-Content "$Target.sha256" -Encoding ascii
+          Copy-Item $Source.FullName "release-assets/NSTrans-$Version-Windows-x64-WithLlama-setup.exe"
+          npm run windows:build:remote
+          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          Copy-Item $Source.FullName "release-assets/NSTrans-$Version-Windows-x64-RemoteOnly-setup.exe"
+          Get-ChildItem release-assets/*.exe | ForEach-Object {
+            $Hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$Hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" -Encoding ascii
+          }
 
       - name: Upload Windows assets
         shell: pwsh

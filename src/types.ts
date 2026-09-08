@@ -1,10 +1,12 @@
 export type Box = { x0: number; y0: number; x1: number; y1: number }
-export type TranslationEngineId = 'translategemma'
+export type TranslationEngineId = 'translategemma' | 'remote-llm'
 export type TextRegion = { id: string; source: string; translated: string; confidence: number; box: Box; fontFamily?: 'serif' | 'sans'; translationEngine?: TranslationEngineId; translationSource?: string; marqueeDurationMs?: number }
 export type LatencySample = { capture: number; ocr: number; translate: number; render: number; total: number }
 export type TranslationProvider = 'macos' | 'llm' | 'preview'
 export type TranslationRoutingSettings = {
   gameId: GameId
+  translationStrategy: 'knowledge-assisted' | 'direct'
+  coreTranslationEngine: 'local' | 'remote'
   contextResetSeconds: number
   contextMaxTurns: number
   entityLookupEnabled: boolean

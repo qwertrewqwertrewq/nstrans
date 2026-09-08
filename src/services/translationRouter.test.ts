@@ -45,6 +45,19 @@ describe('TranslationRouter', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('direct strategy bypasses dictionary, cache, search and learning', async () => {
+    const calls: unknown[][] = [], dictionaries = new DictionaryPackRepository(), memory = new TranslationMemory()
+    dictionaries.install({ schemaVersion: 1, gameId: 'zelda-totk', version: '1', entries: [{ source: 'ゼルダ', target: '塞尔达', category: 'character' }] })
+    memory.rememberTranslation('zelda-totk', 'ja', 'zh-Hans', 'ゼルダ', '缓存译文')
+    const provider = { lookup: vi.fn(async (source: string) => ({ source, status: 'missing' as const })) }
+    const router = new TranslationRouter(runtime(calls, [['模型直译']]), memory, new EntityLearningQueue(memory, provider), dictionaries)
+    const settings = { ...defaultRoutingSettings, translationStrategy: 'direct' as const }
+    expect((await router.translate([request('ゼルダ')], settings))[0].text).toBe('模型直译')
+    expect(provider.lookup).not.toHaveBeenCalled()
+    expect(calls[0][2]).toEqual([])
+    expect(memory.lookup('zelda-totk', 'ja', 'zh-Hans', 'ゼルダ')).toBe('缓存译文')
+  })
+
   it('resolves katakana from the selected game first and the general dictionary second', async () => {
     const calls: unknown[][] = [], dictionaries = new DictionaryPackRepository()
     dictionaries.install({ schemaVersion: 1, gameId: 'general', version: '1', entries: [
@@ -60,7 +73,7 @@ describe('TranslationRouter', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('resolves a katakana entity before the model and supplies it as mandatory terminology', async () => {
+  it('does not block the first model call and supplies a learned entity to later text', async () => {
     const calls: unknown[][] = [], memory = new TranslationMemory()
     const provider = { lookup: vi.fn(async (source: string) => source === 'ハイラル'
       ? { source, target: '海拉鲁', status: 'learned' as const, sourceUrl: 'https://www.wikidata.org/entity/Q1' }
@@ -68,8 +81,10 @@ describe('TranslationRouter', () => {
     const router = new TranslationRouter(runtime(calls), memory, new EntityLearningQueue(memory, provider))
     const result = await router.translate([request('西ハイラル平原')], defaultRoutingSettings)
     expect(result[0].text).toBe('模型译文1-1')
-    expect(calls).toHaveLength(1)
-    expect(calls[0][2]).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'ハイラル', target: '海拉鲁' })]))
+    expect(calls[0][2]).toEqual([])
+    await Promise.resolve()
+    await router.translate([request('東ハイラル平原')], defaultRoutingSettings)
+    expect(calls[1][2]).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'ハイラル', target: '海拉鲁' })]))
   })
 
   it('does not search common katakana exclusions but searches an unknown game-specific name', async () => {
@@ -83,14 +98,17 @@ describe('TranslationRouter', () => {
     expect(provider.lookup).not.toHaveBeenCalledWith('ジオシニオ', expect.objectContaining({ queryText: expect.anything() }))
   })
 
-  it('passes contextual search evidence to TranslateGemma instead of treating it as a direct replacement', async () => {
+  it('learns contextual search evidence in the background and passes it to later text', async () => {
     const calls: unknown[][] = [], memory = new TranslationMemory()
     const research = { term: 'ジオシニオ', query: '王国之泪 ジオシニオ', evidence: ['检索摘要'], sourceUrls: ['https://zh.wikipedia.org/wiki/example'] }
     const provider = { lookup: vi.fn(async (source: string) => ({ source, status: 'pending' as const, research })) }
     const router = new TranslationRouter(runtime(calls), memory, new EntityLearningQueue(memory, provider))
     await router.translate([request('ジオシニオの祠')], defaultRoutingSettings)
-    expect(calls[0][3]).toEqual([research])
+    expect(calls[0][3]).toEqual([])
     expect(calls[0][2]).toEqual([])
+    await Promise.resolve()
+    await router.translate([request('ジオシニオ神殿')], defaultRoutingSettings)
+    expect(calls[1][3]).toEqual([research])
   })
 
   it('learns new translations and reuses them only inside the selected game category', async () => {

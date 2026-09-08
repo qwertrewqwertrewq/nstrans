@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CommunityContributionQueue, isShareableContribution } from './knowledgeSharing'
+import { CommunityContributionQueue, CommunityDictionaryEditor, isShareableContribution } from './knowledgeSharing'
 
 describe('CommunityContributionQueue', () => {
   it('is opt-in and never queues local knowledge before consent', () => {
@@ -27,5 +27,18 @@ describe('CommunityContributionQueue', () => {
     expect(isShareableContribution({ kind: 'translation', source: '・スタンプノマップピン', target: '地图图钉', provenance: 'translategemma' })).toBe(false)
     expect(isShareableContribution({ kind: 'translation', source: 'ズーム(', target: '缩放', provenance: 'translategemma' })).toBe(false)
     expect(isShareableContribution({ kind: 'translation', source: '移動(', target: '移动', provenance: 'translategemma' })).toBe(false)
+  })
+})
+
+describe('CommunityDictionaryEditor', () => {
+  it('uses the authenticated client PATCH API so a manual edit receives the API +1 score', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ dictionaries: { 'zelda-totk': [{ translationId: 123, source: 'ハイラル', target: '海拉鲁' }] } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ score: 8, scoreDelta: 1 }) })
+    vi.stubGlobal('fetch', request)
+    const result = await new CommunityDictionaryEditor('https://nstrans.example', 'nst_live_test').editOrCreate({ gameId: 'zelda-totk', oldSource: 'ハイラル', oldTarget: '海拉鲁', source: 'ハイラル', target: '海拉鲁大陆' })
+    expect(result).toEqual({ created: false, score: 8, scoreDelta: 1 })
+    expect(request).toHaveBeenNthCalledWith(2, 'https://nstrans.example/api/v1/translations/123', expect.objectContaining({ method: 'PATCH', headers: expect.objectContaining({ authorization: 'Bearer nst_live_test' }) }))
+    vi.unstubAllGlobals()
   })
 })

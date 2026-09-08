@@ -1,6 +1,6 @@
 import type { TranslationProvider } from '../types'
 import { invoke, isTauri } from '@tauri-apps/api/core'
-export interface TranslationRequest { text: string; sourceLanguage: string; targetLanguage: string }
+export interface TranslationRequest { text: string; sourceLanguage: string; targetLanguage: string; imageDataUrl?: string }
 export interface Translator { id: TranslationProvider; label: string; available(): Promise<boolean>; translate(request: TranslationRequest): Promise<string>; translateMany?(requests: TranslationRequest[]): Promise<string[]> }
 
 declare global { interface Window { macTranslation?: { isAvailable(): Promise<boolean>; translate(request: TranslationRequest): Promise<string> } } }

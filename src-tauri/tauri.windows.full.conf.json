@@ -1,0 +1,9 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "resources": {
+      "../native/runtime/windows/nstrans-llama.exe": "runtime/nstrans-llama.exe",
+      "../native/runtime/windows/lib": "runtime/lib"
+    }
+  }
+}

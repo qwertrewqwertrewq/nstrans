@@ -17,7 +17,7 @@
 
 ## 隐私与版权边界
 
-- 视频画面、截图和完整 OCR 识别文本只在客户端即时处理，不上传至 NSTrans 社区服务器，服务器也不保存用户截取画面中的对白、剧情文本或画面内容。
+- 视频画面、截图和完整 OCR 识别文本只在客户端即时处理，不上传至 NSTrans 社区服务器，服务器也不保存用户截取画面中的对白、剧情文本或画面内容。用户主动开启“远程视觉 OCR 兜底”时，只有搜索链全部为空的当前文字局部截图、该区域 OCR 文本和游戏名称会直接发送给用户配置的阿里云百炼 Qwen 服务；该开关默认关闭。
 - 客户端本机只会为复用翻译而缓存符合限制的专有名词、单词和短菜单标签；不会建立视频、截图或长篇游戏文本档案。用户可以通过清除应用数据移除这些本地缓存。
 - “共享本地词库贡献”默认关闭。开启后仍只允许上传经过长度、结构和标点过滤的专有名词、单词与短句，不允许上传对白、描述或连续剧情文本。
 - 自动学习的专业词汇来自 Wikipedia、Wikidata 或用户配置的搜索服务，并保存来源链接；搜索候选只作为模型术语提示，不会把网页内容复制进游戏文本库。
@@ -32,14 +32,15 @@
 - 基于文字包围框模糊原文并覆盖译文；长译文滚动显示时锁定近似区域，避免重复翻译和覆盖层跳动
 - 分别显示采集、OCR、翻译、渲染和端到端延迟
 - 内置带时间戳的运行日志，记录 OCR 模型启动、识别数量、词库命中、专名搜索和 LLM 请求/响应
-- 唯一翻译模型为 TranslateGemma 4B；已下载的远程词库包和持久化翻译记忆优先命中，新短句、单词与对白才调用模型
+- 翻译方式可在“词库、缓存与学习辅助”和“OCR 原文直送 LLM”之间切换；直送模式不匹配翻译词库/缓存、不执行术语搜索或学习入库，但仍可启用视觉 OCR 兜底
+- 核心翻译模型可独立选择本机 TranslateGemma 4B 或远程 LLM。远程核心模型可从所有在线模型配置中选择；多模态模型和仅搜索能力模型都可用于纯文本核心翻译，但仅多模态模型能接收 OCR 兜底截图，离线模型配置暂不参与路由
 - 同一帧长文本批量送入同一上下文；持续游戏对白会复用上下文，默认 45 秒无长文后自动开始新对话，也可手动重置
 - 客户端启动时从 `nstrans.221129.xyz` 同步通用词库和当前游戏词库，并保留本地缓存；游戏词库优先于通用词库匹配
-- 未知片假名专名可选择 Wikipedia/Wikidata、Brave Search 或百度千帆作为主搜索服务，并可另选一个无结果时的回退服务；后两者需要用户自己的 API Key
+- 未知片假名专名可选择 Wikipedia/Wikidata、Brave Search、百度千帆、Qwen 3.7 Flash 或 Qwen 3.8 Flash 作为主搜索服务，并可另选一个无结果时的回退服务；除 Wiki 外均使用用户自己的 API Key
 - 用户可选择是否向社区服务器共享本机产生的专名、单词和短标签；默认关闭，上传内容还会经过长度、结构和标点过滤
 - Tauri 2 共用壳层，配合 macOS/iPadOS Apple 原生能力、Android JNI/Kotlin 桥接及 Windows 原生运行时
 
-TranslateGemma 4B 在本机执行。开启“在线学习专有名词”后，仅当前游戏名称和抽取出的候选专名会发送到用户选择的搜索服务；普通对白和完整 OCR 文本不会上传。
+使用词库辅助方式时，开启“在线学习专有名词”后，仅当前游戏名称和抽取出的候选专名会发送到用户选择的搜索服务；普通对白和完整 OCR 文本不会上传。使用 OCR 原文直送方式时，OCR 文字会发送给所选核心模型，但不进入词库、搜索或学习流程。另行开启远程视觉兜底后，系统可裁剪当前 OCR 包围框连同本地 OCR 结果和游戏信息发送给所选多模态模型；直送模式下的兜底结果只在当前会话短期复用，不写入学习词库。
 
 ## 本机运行
 
@@ -63,10 +64,11 @@ rustup update stable
 npm run desktop:dev
 ```
 
-生成 macOS `.app` / `.dmg`（当前 Alpha 未做 Apple Developer ID 签名和公证，首次打开可能需要在系统设置中确认）：
+macOS 提供两种构建。完整版包含桌面本地推理运行时；远程版不包含本地 llama/Ollama 运行时，只能选择远程核心 LLM，但仍保留 MeikiOCR、Apple Vision 和其他客户端功能：
 
 ```bash
-npm run desktop:build
+npm run desktop:build:full
+npm run desktop:build:remote
 ```
 
 产物位于：
@@ -74,6 +76,7 @@ npm run desktop:build
 ```text
 src-tauri/target/release/bundle/macos/NSTrans.app
 src-tauri/target/release/bundle/dmg/NSTrans_0.1.0_aarch64.dmg
+src-tauri/target/release/bundle/dmg/NSTrans_0.1.0_aarch64_remote-only.dmg
 ```
 
 macOS 客户端内置 Ollama 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）。NSTrans 会在本机回环地址启动隔离的 Ollama 服务，不依赖用户另行安装或启动 Ollama；MeikiOCR 与 ONNX 权重随应用分发并作为默认 OCR，Apple Vision 可由用户手动选择，并在 MeikiOCR 不可用时作为回退。所选 OCR 引擎会保存到本机。最终用户无需安装 Python 或启动外部模型服务。
@@ -84,10 +87,11 @@ iPadOS 只使用 Apple Vision OCR。默认构建无签名 IPA，方便用户使�
 
 ```bash
 rustup target add aarch64-apple-ios
-npm run ios:build
+npm run ios:build:with-llama
+npm run ios:build:remote
 ```
 
-产物位于 `src-tauri/gen/apple/build/arm64/NSTrans.ipa`。如果构建机已配置开发团队并希望让 Xcode 正常签名和导出，可设置 `NSTRANS_IOS_ALLOW_SIGNING=1` 后构建。
+`WithLlama` 会静态编译移动端 llama.cpp，允许导入 IQ4_XS GGUF；`RemoteOnly` 不编译 llama.cpp，只使用配置的远程核心模型，因而安装包和运行内存压力更小。两个命令的原始产物都位于 `src-tauri/gen/apple/build/arm64/NSTrans.ipa`，连续构建时后一个会覆盖前一个；GitHub Actions 会分别复制并标名。如果构建机已配置开发团队并希望让 Xcode 正常签名和导出，可设置 `NSTRANS_IOS_ALLOW_SIGNING=1` 后构建。
 
 ## Android 构建
 
@@ -95,14 +99,22 @@ Android 当前只提供 arm64 调试签名测试包，需要 Android SDK、NDK�
 
 ```bash
 rustup target add aarch64-linux-android
-npm run android:build
+npm run android:build:with-llama
+npm run android:build:remote
 ```
 
-产物位于 `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`。该包只用于兼容性测试，不应视为经过发布签名的正式版本。
+`WithLlama` 静态编译移动端 llama.cpp；`RemoteOnly` 完全省略该依赖并要求使用远程核心模型。原始产物位于 `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`，连续构建时后一个会覆盖前一个；GitHub Actions 会分别复制并标名。该包只用于兼容性测试，不应视为经过发布签名的正式版本。
 
 ## Windows 构建
 
 Windows x64 客户端只使用 MeikiOCR，不加载 Apple Vision 或 Tesseract 回退。TranslateGemma 使用随应用分发的 Ollama 运行时，用户可在控制台选择 Ollama 的 CUDA、Vulkan 或 CPU 推理后端；选择会保存在本机并在切换后重启模型进程。MeikiOCR、模型管理、三种后端选择和 NSIS 打包均已完成接入。
+
+Windows 同样提供完整版和不打包本地 llama/Ollama 的远程版：
+
+```powershell
+npm run windows:build:full
+npm run windows:build:remote
+```
 
 构建机需要 Windows 10/11 x64、Node.js 20+、Rust stable、Visual Studio 2022 C++ Build Tools、WebView2，以及 Python 3.11。首次执行会下载官方 Windows Ollama 独立运行包，并把 MeikiOCR 工作进程及其 ONNX 权重打包成离线 EXE；TranslateGemma 权重不放入安装包，由客户端首次运行时下载或由用户导入：
 
@@ -149,9 +161,9 @@ npm run build
 
 ## GitHub Actions 自动构建
 
-`.github/workflows/ci.yml` 会在 `main` 的提交和拉取请求上执行测试、Lint 与前端构建。跨平台安装包不会在每次提交时重复生成，以控制构建时间和存储占用。
+`.github/workflows/ci.yml` 会在 `main` 的提交和拉取请求上执行测试、Lint 与前端构建。`.github/workflows/platform-builds.yml` 会在每次推送到 `main` 后并行构建 macOS、Windows、iPadOS、Android；每个平台均上传两个名称明确的 Actions Artifact：`WithLlama`（包含本地推理运行时）与 `RemoteOnly`（不包含本地推理运行时，只使用远程核心模型）。也可以从 Actions 页面手动触发该工作流。
 
-推送 `v*` 标签会触发 `.github/workflows/release.yml`，并行生成 Windows x64 NSIS、macOS Apple Silicon DMG、未签名 iPadOS IPA 和 Android arm64 调试 APK，然后使用仓库自动提供的 `GITHUB_TOKEN` 直接上传到对应 GitHub Release：
+推送 `v*` 标签会触发 `.github/workflows/release.yml`，为四个平台同时生成 `WithLlama` 与 `RemoteOnly` 两套带校验和的安装包，然后使用仓库自动提供的 `GITHUB_TOKEN` 直接上传到对应 GitHub Release：
 
 ```bash
 git tag v0.1.1

@@ -34,6 +34,19 @@ describe('TranslationMemory', () => {
     expect(memory.needsEntityLookup('zelda-totk', 'ジオシニオ')).toBe(false)
   })
 
+  it('removes previously learned controller glyphs but keeps Han-shaped OCR aliases', () => {
+    const storage = new TestStorage()
+    storage.value = JSON.stringify({ version: 2, translations: [], entities: [
+      { gameId: 'zelda-totk', source: '4', target: '+', status: 'learned', updatedAt: 1 },
+      { gameId: 'zelda-totk', source: 'X', target: 'X', status: 'learned', updatedAt: 1 },
+      { gameId: 'zelda-totk', source: '世儿夕', canonicalSource: 'ゼルダ', target: '塞尔达', status: 'learned', updatedAt: 1 },
+    ] })
+    const memory = new TranslationMemory(storage)
+    expect(memory.matchLearnedEntity('zelda-totk', '4')).toBeUndefined()
+    expect(memory.matchLearnedEntity('zelda-totk', 'X')).toBeUndefined()
+    expect(memory.matchLearnedEntity('zelda-totk', '世儿夕')?.target).toBe('塞尔达')
+  })
+
   it('queues only short translations and learned terms after sharing consent', () => {
     const contributions = new CommunityContributionQueue(), memory = new TranslationMemory(undefined, contributions)
     contributions.setEnabled(true)

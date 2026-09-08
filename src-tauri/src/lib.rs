@@ -4,7 +4,7 @@ use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 
 #[cfg(target_os = "android")]
 mod android_runtime;
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
 mod android_llm;
 #[cfg(target_os = "ios")]
 mod ios_bridge;
@@ -63,8 +63,12 @@ struct LlamaMessage { content: String }
 struct LlamaState(Arc<Mutex<Option<Child>>>);
 
 #[derive(Clone)]
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
 struct LlamaState(Arc<Mutex<android_llm::MobileLlm>>);
+
+#[derive(Clone)]
+#[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+struct LlamaState;
 
 fn isolate_process(command: &mut Command) {
   #[cfg(unix)]
@@ -181,7 +185,7 @@ async fn has_translategemma(app: &AppHandle, shared: &Arc<Mutex<Option<Child>>>)
   Ok(body.models.unwrap_or_default().iter().any(|model| model.name.starts_with("translategemma:4b")))
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
 // Use the llama.cpp-converted text GGUF. Ollama's registry blob is a combined
 // text + vision container: Ollama can load it, but upstream llama.cpp expects
 // the vision projector separately and rejects the extra tensors.
@@ -191,7 +195,7 @@ const MOBILE_TRANSLATEGEMMA_URL: &str = if cfg!(target_os = "ios") {
   "https://huggingface.co/Qwe1325/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it-q4_k_m.gguf"
 };
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
 fn mobile_model_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
   // Tauri's Android app_data_dir resolves to Context.dataDir, while the
   // native document picker stores durable app files under Context.filesDir.
@@ -209,7 +213,7 @@ fn mobile_model_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
   Ok(model)
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
 async fn download_mobile_model(app: &AppHandle, url: &str) -> Result<(), String> {
   let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "请输入有效的模型 URL".to_string())?;
   if !matches!(parsed.scheme(), "http" | "https") { return Err("模型 URL 仅支持 HTTP 或 HTTPS".into()); }
@@ -234,7 +238,7 @@ async fn download_mobile_model(app: &AppHandle, url: &str) -> Result<(), String>
 
 #[tauri::command]
 async fn translategemma_status(app: AppHandle, state: State<'_, LlamaState>) -> Result<RuntimeStatus, String> {
-  #[cfg(any(target_os = "android", target_os = "ios"))]
+  #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
     let _ = state;
     let path = mobile_model_path(&app)?;
@@ -242,6 +246,11 @@ async fn translategemma_status(app: AppHandle, state: State<'_, LlamaState>) -> 
       Ok(()) => RuntimeStatus { available: true, error: None },
       Err(_) => RuntimeStatus { available: false, error: Some("TranslateGemma 4B GGUF 模型尚未下载".into()) },
     });
+  }
+  #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+  {
+    let _ = (app, state);
+    return Ok(RuntimeStatus { available: false, error: Some("此 RemoteOnly 构建未包含本地 llama.cpp".into()) });
   }
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   {
@@ -256,11 +265,16 @@ async fn translategemma_status(app: AppHandle, state: State<'_, LlamaState>) -> 
 
 #[tauri::command]
 async fn translategemma_install(app: AppHandle, state: State<'_, LlamaState>) -> Result<RuntimeStatus, String> {
-  #[cfg(any(target_os = "android", target_os = "ios"))]
+  #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
     download_mobile_model(&app, MOBILE_TRANSLATEGEMMA_URL).await?;
     state.0.lock().map_err(|_| "无法锁定 llama.cpp 运行时".to_string())?.unload();
     return Ok(RuntimeStatus { available: true, error: None });
+  }
+  #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+  {
+    let _ = (app, state);
+    return Err("此 RemoteOnly 构建未包含本地 llama.cpp，请选择远程核心模型".into());
   }
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   {
@@ -329,7 +343,7 @@ fn import_gguf(app: &AppHandle, shared: &Arc<Mutex<Option<Child>>>, path: &std::
 
 #[tauri::command]
 async fn translategemma_import_file(app: AppHandle, state: State<'_, LlamaState>, path: String) -> Result<RuntimeStatus, String> {
-  #[cfg(any(target_os = "android", target_os = "ios"))]
+  #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
     let destination = mobile_model_path(&app)?;
     let source = std::path::PathBuf::from(path);
@@ -342,6 +356,11 @@ async fn translategemma_import_file(app: AppHandle, state: State<'_, LlamaState>
     }).await.map_err(|error| format!("模型导入任务失败：{error}"))??;
     state.0.lock().map_err(|_| "无法锁定 llama.cpp 运行时".to_string())?.unload();
     return Ok(RuntimeStatus { available: true, error: None });
+  }
+  #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+  {
+    let _ = (app, state, path);
+    return Err("此 RemoteOnly 构建未包含本地 llama.cpp，无法导入本地模型".into());
   }
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   {
@@ -368,7 +387,7 @@ async fn translategemma_pick_file(app: AppHandle, state: State<'_, LlamaState>) 
 }
 
 #[tauri::command]
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "local-llama"))]
 async fn translategemma_pick_file(app: AppHandle, state: State<'_, LlamaState>) -> Result<ModelPickerResult, String> {
   let runtime = app.state::<android_runtime::AndroidRuntime<tauri::Wry>>().inner().clone();
   let result = runtime.pick_model()?;
@@ -380,7 +399,7 @@ async fn translategemma_pick_file(app: AppHandle, state: State<'_, LlamaState>) 
 }
 
 #[tauri::command]
-#[cfg(target_os = "ios")]
+#[cfg(all(target_os = "ios", feature = "local-llama"))]
 async fn translategemma_pick_file(app: AppHandle, state: State<'_, LlamaState>) -> Result<ModelPickerResult, String> {
   let model = mobile_model_path(&app)?;
   let staged = model.with_extension("gguf.importing");
@@ -400,12 +419,24 @@ async fn translategemma_pick_file(app: AppHandle, state: State<'_, LlamaState>) 
 }
 
 #[tauri::command]
+#[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+async fn translategemma_pick_file(app: AppHandle, state: State<'_, LlamaState>) -> Result<ModelPickerResult, String> {
+  let _ = (app, state);
+  Err("此 RemoteOnly 构建未包含本地 llama.cpp，无法选择本地模型".into())
+}
+
+#[tauri::command]
 async fn translategemma_install_url(app: AppHandle, state: State<'_, LlamaState>, url: String) -> Result<RuntimeStatus, String> {
-  #[cfg(any(target_os = "android", target_os = "ios"))]
+  #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
     download_mobile_model(&app, &url).await?;
     state.0.lock().map_err(|_| "无法锁定 llama.cpp 运行时".to_string())?.unload();
     return Ok(RuntimeStatus { available: true, error: None });
+  }
+  #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+  {
+    let _ = (app, state, url);
+    return Err("此 RemoteOnly 构建未包含本地 llama.cpp，无法下载本地模型".into());
   }
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   {
@@ -437,7 +468,7 @@ async fn translategemma_install_url(app: AppHandle, state: State<'_, LlamaState>
 
 #[tauri::command]
 async fn translategemma_generate(app: AppHandle, state: State<'_, LlamaState>, prompt: String) -> Result<GeneratedTranslation, String> {
-  #[cfg(any(target_os = "android", target_os = "ios"))]
+  #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
     let path = mobile_model_path(&app)?;
     validate_gguf(&path)?;
@@ -445,6 +476,11 @@ async fn translategemma_generate(app: AppHandle, state: State<'_, LlamaState>, p
     let translation = tauri::async_runtime::spawn_blocking(move || shared.lock().map_err(|_| "无法锁定 llama.cpp 运行时".to_string())?.generate(&path, &prompt))
       .await.map_err(|error| format!("TranslateGemma 推理任务失败：{error}"))??;
     return Ok(GeneratedTranslation { translation });
+  }
+  #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+  {
+    let _ = (app, state, prompt);
+    return Err("此 RemoteOnly 构建未包含本地 llama.cpp，请选择远程核心模型".into());
   }
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   {
@@ -466,13 +502,17 @@ async fn translategemma_generate(app: AppHandle, state: State<'_, LlamaState>, p
 
 #[tauri::command]
 async fn translategemma_unload(state: State<'_, LlamaState>) -> Result<(), String> {
-  #[cfg(any(target_os = "android", target_os = "ios"))]
+  #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
     let shared = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
       shared.lock().map_err(|_| "无法锁定 llama.cpp 运行时".to_string())?.unload();
       Ok::<(), String>(())
     }).await.map_err(|error| format!("释放 TranslateGemma 任务失败：{error}"))??;
+  }
+  #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+  {
+    let _ = state;
   }
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   {
@@ -547,6 +587,47 @@ async fn entity_web_search(engine: String, query: String, api_key: String) -> Re
     }).take(8).collect());
   }
   Err("不支持的搜索引擎".into())
+}
+
+#[derive(Debug, Serialize)]
+struct QwenFlashOutput { content: String }
+
+#[tauri::command]
+async fn qwen_flash_request(model: String, api_key: String, prompt: String, image_data_url: Option<String>, enable_search: bool, endpoint: Option<String>, search_only: bool) -> Result<QwenFlashOutput, String> {
+  if model.is_empty() || model.len() > 120 || !model.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':' | '/')) { return Err("模型 ID 格式无效".into()); }
+  if api_key.trim().is_empty() || prompt.trim().is_empty() { return Err("Qwen API Key 或提示词为空".into()); }
+  if let Some(image) = image_data_url.as_ref() {
+    if !image.starts_with("data:image/jpeg;base64,") && !image.starts_with("data:image/png;base64,") && !image.starts_with("data:image/webp;base64,") { return Err("视觉兜底只接受本地 JPEG/PNG/WebP 截图".into()); }
+    if image.len() > 8 * 1024 * 1024 { return Err("视觉兜底截图超过 8MB".into()); }
+  }
+  if search_only && image_data_url.is_some() { return Err("仅搜索模型不能接收截图".into()); }
+  let content = if let Some(image) = image_data_url {
+    serde_json::json!([{ "image": image }, { "text": prompt }])
+  } else { serde_json::json!([{ "text": prompt }]) };
+  let multimodal_payload = serde_json::json!({
+    "model": model,
+    "input": { "messages": [{ "role": "user", "content": content }] },
+    "parameters": { "temperature": 0.1, "enable_search": enable_search, "incremental_output": enable_search, "response_format": { "type": "json_object" } }
+  });
+  let text_payload = serde_json::json!({ "model": model, "messages": [{ "role": "user", "content": prompt }], "temperature": 0.1, "enable_search": enable_search, "response_format": { "type": "json_object" } });
+  let request_url = endpoint.filter(|url| url.starts_with("https://")).unwrap_or_else(|| if search_only { "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions".into() } else { "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation".into() });
+  let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).build().map_err(|error| error.to_string())?;
+  let mut request = client.post(request_url).bearer_auth(api_key).json(if search_only { &text_payload } else { &multimodal_payload });
+  if enable_search { request = request.header("X-DashScope-SSE", "enable"); }
+  let response = request.send().await.map_err(|error| format!("Qwen Flash 请求失败：{error}"))?;
+  let status = response.status();
+  let raw = response.text().await.map_err(|error| format!("Qwen Flash 响应无法读取：{error}"))?;
+  if !status.is_success() { return Err(serde_json::from_str::<serde_json::Value>(&raw).ok().and_then(|body| body.get("message").and_then(|value| value.as_str()).map(String::from)).unwrap_or_else(|| format!("Qwen Flash 服务不可用 ({status})"))); }
+  let extract = |body: &serde_json::Value| body.pointer("/output/choices/0/message/content").and_then(|value| value.as_array()).into_iter().flatten().filter_map(|item| item.get("text").and_then(|value| value.as_str())).collect::<String>();
+  let content = if search_only {
+    serde_json::from_str::<serde_json::Value>(&raw).ok().and_then(|body| body.pointer("/choices/0/message/content").and_then(|value| value.as_str()).map(String::from)).unwrap_or_default()
+  } else if enable_search {
+    raw.lines().filter_map(|line| line.strip_prefix("data:")).filter_map(|data| serde_json::from_str::<serde_json::Value>(data.trim()).ok()).map(|body| extract(&body)).collect::<String>()
+  } else {
+    extract(&serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| format!("Qwen Flash 响应无法解析：{error}"))?)
+  };
+  if content.trim().is_empty() { return Err("Qwen Flash 未返回文本".into()); }
+  Ok(QwenFlashOutput { content })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -796,19 +877,21 @@ pub fn run() {
   let application = tauri::Builder::default();
   #[cfg(target_os = "android")]
   let application = application.plugin(android_runtime::init());
-  #[cfg(target_os = "android")]
+  #[cfg(all(target_os = "android", feature = "local-llama"))]
   let application = application.manage(LlamaState(Arc::new(Mutex::new(
     android_llm::MobileLlm::new().expect("无法初始化 Android llama.cpp 运行时"),
   ))));
-  #[cfg(target_os = "ios")]
+  #[cfg(all(target_os = "ios", feature = "local-llama"))]
   let application = application.manage(LlamaState(Arc::new(Mutex::new(
     android_llm::MobileLlm::new().expect("无法初始化 iOS llama.cpp 运行时"),
   ))));
+  #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
+  let application = application.manage(LlamaState);
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   let application = application.manage(LlamaState(Arc::new(Mutex::new(None))));
   let application = application
     .manage(MeikiState(Arc::new(Mutex::new(None))))
-    .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, entity_web_search])
+    .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, entity_web_search, qwen_flash_request])
     .setup(|app| {
       #[cfg(not(any(target_os = "android", target_os = "ios")))]
       {

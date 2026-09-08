@@ -41,15 +41,16 @@ export class DictionaryPackRepository {
     this.persist()
   }
 
-  async sync(gameId: GameId, provider: DictionaryDistributionProvider) {
+  async sync(gameId: GameId, provider: DictionaryDistributionProvider, force = false) {
     const current = this.packs.get(gameId)
     const pack = await provider.fetchPack(gameId, current?.version)
-    if (!pack || pack.version === current?.version) return false
+    if (!pack || !force && pack.version === current?.version) return false
     this.install(pack); return true
   }
 
-  match(gameId: GameId, text: string) {
-    const entries = this.entriesFor(gameId)
+  match(gameId: GameId, text: string, overrides: readonly GlossaryEntry[] = []) {
+    const overrideSources = new Set(overrides.map((entry) => normalize(entry.source)))
+    const entries = [...overrides, ...this.entriesFor(gameId).filter((entry) => !overrideSources.has(normalize(entry.source)))]
     const exact = entries.find((entry) => normalize(entry.source) === normalize(text))
     return exact ?? composeKnownTerms(text, entries)
   }
