@@ -32,6 +32,7 @@
 - 基于文字包围框模糊原文并覆盖译文；长译文滚动显示时锁定近似区域，避免重复翻译和覆盖层跳动
 - 分别显示采集、OCR、翻译、渲染和端到端延迟
 - 内置带时间戳的运行日志，记录 OCR 模型启动、识别数量、词库命中、专名搜索和 LLM 请求/响应
+- 可发现同一局域网内的 NSTrans TV 客户端，也可按 IP 握手连接；支持传输透明 PNG 字幕层或带坐标、字体与滚动参数的文本字幕
 - 翻译方式可在“词库、缓存与学习辅助”和“OCR 原文直送 LLM”之间切换；直送模式不匹配翻译词库/缓存、不执行术语搜索或学习入库，但仍可启用视觉 OCR 兜底
 - 核心翻译模型可独立选择本机 TranslateGemma 4B 或远程 LLM。远程核心模型可从所有在线模型配置中选择；多模态模型和仅搜索能力模型都可用于纯文本核心翻译，但仅多模态模型能接收 OCR 兜底截图，离线模型配置暂不参与路由
 - 同一帧长文本批量送入同一上下文；持续游戏对白会复用上下文，默认 45 秒无长文后自动开始新对话，也可手动重置
@@ -104,6 +105,19 @@ npm run android:build:remote
 ```
 
 `WithLlama` 静态编译移动端 llama.cpp；`RemoteOnly` 完全省略该依赖并要求使用远程核心模型。原始产物位于 `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`，连续构建时后一个会覆盖前一个；GitHub Actions 会分别复制并标名。该包只用于兼容性测试，不应视为经过发布签名的正式版本。
+
+## Android TV / 投影仪字幕客户端
+
+[`androidscreenclient`](./androidscreenclient) 是独立的 Android 6+ 电视接收端，不负责 OCR 和翻译。它可显示系统 TV Input Framework 提供的 HDMI 输入，并以系统悬浮层接收 NSTrans 的实时字幕；即使切换到厂商自带 HDMI 应用，后台接收服务仍可继续覆盖字幕。
+
+```bash
+cd androidscreenclient
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell appops set com.example.androidscreenclient SYSTEM_ALERT_WINDOW allow
+```
+
+电视端使用 UDP `38472` 自动广播，字幕服务监听 TCP `38471`。自动发现被路由器的 AP 隔离阻止时，可在 NSTrans 的“输入源与实时控制”卡片直接填写电视 IP。文本模式保留电视端滚动能力；图片模式更接近本机布局，并会在传输期间隐藏本机字幕层。详细协议及设备限制见 [`androidscreenclient/README.md`](./androidscreenclient/README.md)。
 
 ## Windows 构建
 

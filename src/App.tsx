@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Activity, Camera, ChevronDown, Expand, Gauge, KeyRound, Languages, LayoutGrid, LoaderCircle, Maximize, Pause, Play, RefreshCw, RotateCcw, ScanText, Settings2, Sparkles, Video } from 'lucide-react'
+import { Activity, Camera, Cast, ChevronDown, Expand, Gauge, KeyRound, Languages, LayoutGrid, LoaderCircle, Maximize, Pause, Play, RefreshCw, RotateCcw, ScanText, Settings2, Sparkles, Unplug, Video, Wifi } from 'lucide-react'
 import './App.css'
 import { DialogueStabilizer } from './services/dialogueStabilizer'
 import { disposeOcr, fitCaptureSize, recognizeJapanese, type OcrProgress } from './services/ocr'
@@ -25,6 +25,7 @@ import { closeUsbVideoDevice, listUsbVideoDevices, openUsbVideoDevice, readUsbVi
 import { cropOcrRegionDataUrl } from './services/visionCrop'
 import { TerminologyInspector } from './components/TerminologyInspector'
 import { RemoteModelManager } from './components/RemoteModelManager'
+import { buildTvImagePayload, buildTvTextPayload, connectTv, disconnectTv, listTvDevices, pushTvOverlay, tvConnectionStatus, type TvCastMode, type TvConnectionStatus, type TvDevice } from './services/tvCast'
 
 const emptyLatency: LatencySample = {
   capture: 0,
@@ -54,6 +55,8 @@ const optionalPanelLabels: Record<OptionalPanel, string> = {
 const optionalPanelIds = Object.keys(optionalPanelLabels) as OptionalPanel[]
 const panelVisibilityStorageKey = 'nstrans.visible-panels.v1'
 const routingModeStorageKey = 'nstrans.translation-routing.v1'
+const tvCastModeStorageKey = 'nstrans.tv-cast-mode.v1'
+const tvCastAddressStorageKey = 'nstrans.tv-cast-address.v1'
 const localRuntimeBundled = import.meta.env.VITE_NSTRANS_REMOTE_ONLY !== '1'
 function errorMessage(reason: unknown, fallback: string) {
   if (reason instanceof Error && reason.message) return reason.message
@@ -126,6 +129,7 @@ function App() {
   const translationRetryRef = useRef(new Map<string, { source: string; retryAt: number }>())
   const translationBusyRef = useRef(false)
   const translationEpochRef = useRef(0)
+  const lastTvPayloadRef = useRef('')
   const latestVisibleRegionsRef = useRef<TextRegion[]>([])
   const [devices, setDevices] = useState<VideoInputDevice[]>([]),
     [deviceId, setDeviceId] = useState('')
@@ -210,6 +214,12 @@ function App() {
     opacity: 92,
     fontScale: 1,
   })
+  const [tvDevices, setTvDevices] = useState<TvDevice[]>([])
+  const [tvAddress, setTvAddress] = useState(() => localStorage.getItem(tvCastAddressStorageKey) ?? '')
+  const [tvCastMode, setTvCastMode] = useState<TvCastMode>(() => localStorage.getItem(tvCastModeStorageKey) === 'image' ? 'image' : 'text')
+  const [tvConnection, setTvConnection] = useState<TvConnectionStatus>({ connected: false })
+  const [tvConnectionBusy, setTvConnectionBusy] = useState(false)
+  const [tvConnectionMessage, setTvConnectionMessage] = useState('正在发现同一局域网内的电视客户端…')
   const [expandedPreview, setExpandedPreview] = useState(false),
     [fullscreenPreview, setFullscreenPreview] = useState(mobileClient),
     [playbackPaused, setPlaybackPaused] = useState(false)
@@ -294,6 +304,24 @@ function App() {
     return () => window.clearInterval(timer)
   }, [mobileClient, inputActive, refreshDevices])
   useEffect(() => subscribeDiagnosticLog((entry) => setDiagnosticLogs((current) => [...current, entry].slice(-300))), [])
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    const refresh = () => {
+      void listTvDevices().then((devices) => {
+        if (!active) return
+        setTvDevices(devices)
+        if (!tvConnection.connected) setTvConnectionMessage(devices.length ? `发现 ${devices.length} 个电视客户端` : '正在发现同一局域网内的电视客户端…')
+      }).catch(() => undefined)
+    }
+    void tvConnectionStatus().then((status) => { if (active) setTvConnection(status) })
+    refresh()
+    const timer = window.setInterval(refresh, 2500)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [tvConnection.connected])
   useEffect(() => {
     const element = diagnosticLogRef.current
     if (element) element.scrollTop = element.scrollHeight
@@ -902,6 +930,75 @@ function App() {
       resetContext: true,
     })
   }
+  const connectTelevision = async (address = tvAddress) => {
+    if (!address.trim()) {
+      setTvConnectionMessage('请输入电视客户端 IP 地址，或从自动发现列表选择')
+      return
+    }
+    setTvConnectionBusy(true)
+    setTvConnectionMessage('正在与电视客户端握手…')
+    try {
+      const status = await connectTv(address)
+      setTvConnection(status)
+      setTvAddress(status.address ?? address)
+      localStorage.setItem(tvCastAddressStorageKey, status.address ?? address)
+      lastTvPayloadRef.current = ''
+      setTvConnectionMessage(`已连接 ${status.name ?? 'Android TV'}`)
+      writeDiagnosticLog('电视输出', '电视客户端握手成功', `${status.name ?? 'Android TV'} · ${status.address ?? address}`, 'success')
+    } catch (reason) {
+      const message = errorMessage(reason, '无法连接电视客户端')
+      setTvConnection({ connected: false })
+      setTvConnectionMessage(message)
+      writeDiagnosticLog('电视输出', '电视客户端握手失败', message, 'error')
+    } finally {
+      setTvConnectionBusy(false)
+    }
+  }
+  const disconnectTelevision = async () => {
+    await disconnectTv().catch(() => ({ connected: false }))
+    setTvConnection({ connected: false })
+    lastTvPayloadRef.current = ''
+    setTvConnectionMessage('已断开电视客户端')
+    writeDiagnosticLog('电视输出', '电视客户端已断开', undefined, 'warning')
+  }
+  const selectTvCastMode = (mode: TvCastMode) => {
+    setTvCastMode(mode)
+    localStorage.setItem(tvCastModeStorageKey, mode)
+    lastTvPayloadRef.current = ''
+  }
+  useEffect(() => {
+    if (!tvConnection.connected || !isTauri()) return
+    const translated = overlay.enabled ? regions.filter((region) => region.translated.trim()) : []
+    const fingerprint = JSON.stringify({
+      mode: tvCastMode,
+      width: frameSize.captureWidth,
+      height: frameSize.captureHeight,
+      settings: overlay,
+      regions: translated.map((region) => [region.id, region.translated, region.box, region.marqueeDurationMs]),
+    })
+    if (fingerprint === lastTvPayloadRef.current) return
+    const timer = window.setTimeout(() => {
+      try {
+        const payload = tvCastMode === 'image'
+          ? buildTvImagePayload(translated, frameSize.captureWidth, frameSize.captureHeight, overlay)
+          : buildTvTextPayload(translated, frameSize.captureWidth, frameSize.captureHeight, overlay)
+        void pushTvOverlay(payload)
+          .then(() => {
+            lastTvPayloadRef.current = fingerprint
+            setTvConnectionMessage(`正在向 ${tvConnection.name ?? '电视客户端'}发送${tvCastMode === 'image' ? '图片图层' : '文本字幕'}`)
+          })
+          .catch((reason) => {
+            const message = errorMessage(reason, '电视字幕发送失败')
+            setTvConnection({ connected: false })
+            setTvConnectionMessage(message)
+            writeDiagnosticLog('电视输出', '字幕传输中断', message, 'error', 2_000)
+          })
+      } catch (reason) {
+        setTvConnectionMessage(errorMessage(reason, '无法生成电视字幕图层'))
+      }
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [frameSize.captureHeight, frameSize.captureWidth, overlay, regions, tvCastMode, tvConnection.connected, tvConnection.name])
   const averageConfidence = useMemo(() => (regions.length ? Math.round(regions.reduce((sum, item) => sum + item.confidence, 0) / regions.length) : 0), [regions])
   const terminology = knowledgeServices.router.getTerminology(
     regions.map((region) => ({ id: region.id, text: region.source })),
@@ -1135,7 +1232,7 @@ function App() {
                   </div>
                 </div>
               )}
-              {inputActive && overlay.enabled && regions.filter((region) => region.translated).map((region) => <TranslationOverlay region={region} frameSize={frameSize} videoRect={videoRect} overlay={overlay} key={region.id} />)}
+              {inputActive && overlay.enabled && !(tvConnection.connected && tvCastMode === 'image') && regions.filter((region) => region.translated).map((region) => <TranslationOverlay region={region} frameSize={frameSize} videoRect={videoRect} overlay={overlay} key={region.id} />)}
               {captureSelection && (
                 <div
                   className="active-capture-selection"
@@ -1239,6 +1336,35 @@ function App() {
                 断开当前输入源
               </button>
             )}
+            <div className="tv-cast-control">
+              <div className="latency-title">
+                <Cast size={15} />
+                <strong>电视字幕输出</strong>
+                <span className={`tv-connection-dot ${tvConnection.connected ? 'connected' : ''}`} />
+              </div>
+              <div className="segmented">
+                <button className={tvCastMode === 'text' ? 'active' : ''} onClick={() => selectTvCastMode('text')}>文本传输</button>
+                <button className={tvCastMode === 'image' ? 'active' : ''} onClick={() => selectTvCastMode('image')}>图片图层</button>
+              </div>
+              <small className="muted">文本模式由电视端按当前字体、透明度和滚动参数绘制；图片模式发送透明 PNG，连接期间本机同步隐藏字幕层。</small>
+              {tvDevices.length > 0 && (
+                <div className="tv-device-list">
+                  {tvDevices.map((device) => (
+                    <button key={device.id} className="tv-device" disabled={tvConnectionBusy} onClick={() => void connectTelevision(`${device.address}:${device.port}`)}>
+                      <Wifi size={14} />
+                      <span><strong>{device.name}</strong><small>{device.address}:{device.port}</small></span>
+                      <i>连接</i>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="tv-address-row">
+                <input value={tvAddress} onChange={(event) => setTvAddress(event.target.value)} placeholder="电视 IP，例如 192.168.1.80" aria-label="电视客户端 IP 地址" />
+                <button className="secondary" disabled={tvConnectionBusy} onClick={() => void connectTelevision()}>{tvConnectionBusy ? <LoaderCircle className="spin" size={14} /> : <Cast size={14} />}握手</button>
+              </div>
+              <div className={`notice ${tvConnection.connected ? 'success' : ''}`}>{tvConnectionMessage}</div>
+              {tvConnection.connected && <button className="text-button" onClick={() => void disconnectTelevision()}><Unplug size={14} />断开电视输出</button>}
+            </div>
             <div className="inline-latency">
               <div className="latency-title">
                 <Gauge size={15} />

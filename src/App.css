@@ -788,6 +788,80 @@
   flex-wrap: wrap;
   gap: 5px;
 }
+
+.tv-cast-control {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(95, 216, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(53, 180, 218, 0.045);
+}
+.tv-cast-control .latency-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tv-connection-dot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: #667184;
+  box-shadow: 0 0 0 3px rgba(102, 113, 132, 0.12);
+}
+.tv-connection-dot.connected {
+  background: #54dda1;
+  box-shadow: 0 0 0 3px rgba(84, 221, 161, 0.14);
+}
+.tv-device-list {
+  display: grid;
+  gap: 5px;
+}
+.tv-device {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  color: #dce7f7;
+  text-align: left;
+  border: 1px solid rgba(125, 153, 190, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.tv-device:hover {
+  border-color: rgba(70, 205, 242, 0.42);
+  background: rgba(70, 205, 242, 0.08);
+}
+.tv-device span {
+  display: grid;
+  gap: 1px;
+}
+.tv-device small {
+  color: #718096;
+  font: 9px ui-monospace, monospace;
+}
+.tv-device i {
+  color: #60cce9;
+  font-size: 10px;
+  font-style: normal;
+}
+.tv-address-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.tv-address-row input {
+  min-width: 0;
+}
+.tv-cast-control .text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
 .engine-status span {
   display: flex;
   align-items: center;

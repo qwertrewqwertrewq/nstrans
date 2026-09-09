@@ -40,6 +40,9 @@ src-tauri/gen/apple/assets/
 src-tauri/gen/apple/build/
 src-tauri/gen/apple/Externals/
 src-tauri/gen/apple/**/xcuserdata/
+androidscreenclient/.gradle/
+androidscreenclient/app/build/
+androidscreenclient/artifacts/
 
 # Installers, archives, models selected at runtime, and signing material
 *.apk

@@ -4,5 +4,7 @@
 <dict>
   <key>NSCameraUsageDescription</key>
   <string>NSTrans 需要访问 USB 采集卡或摄像头，以识别和翻译画面中的文字。</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>NSTrans 需要访问局域网，以发现并连接 Android 电视字幕客户端。</string>
 </dict>
 </plist>

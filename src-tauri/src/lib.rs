@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::{io::{BufRead, BufReader, Write}, process::{Child, ChildStdin, ChildStdout, Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 
+mod tv_cast;
+
 #[cfg(target_os = "android")]
 mod android_runtime;
 #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
@@ -891,7 +893,8 @@ pub fn run() {
   let application = application.manage(LlamaState(Arc::new(Mutex::new(None))));
   let application = application
     .manage(MeikiState(Arc::new(Mutex::new(None))))
-    .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, entity_web_search, qwen_flash_request])
+    .manage(tv_cast::TvCastState::new())
+    .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, entity_web_search, qwen_flash_request, tv_cast::tv_cast_devices, tv_cast::tv_cast_connect, tv_cast::tv_cast_status, tv_cast::tv_cast_push, tv_cast::tv_cast_disconnect])
     .setup(|app| {
       #[cfg(not(any(target_os = "android", target_os = "ios")))]
       {
@@ -914,6 +917,7 @@ pub fn run() {
     .expect("error while building tauri application");
   application.run(|app, event| {
     if matches!(event, tauri::RunEvent::Exit) {
+      app.state::<tv_cast::TvCastState>().shutdown();
       #[cfg(not(any(target_os = "android", target_os = "ios")))]
       {
       if let Ok(mut guard) = app.state::<LlamaState>().0.lock() {

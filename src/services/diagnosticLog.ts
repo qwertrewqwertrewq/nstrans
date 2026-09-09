@@ -1,5 +1,5 @@
 export type DiagnosticLogLevel = 'info' | 'success' | 'warning' | 'error'
-export type DiagnosticLogCategory = '系统' | 'OCR' | '词库' | '搜索' | 'LLM'
+export type DiagnosticLogCategory = '系统' | 'OCR' | '词库' | '搜索' | 'LLM' | '电视输出'
 export type DiagnosticLogEntry = {
   id: number
   timestamp: number
