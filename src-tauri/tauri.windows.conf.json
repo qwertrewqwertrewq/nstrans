@@ -2,6 +2,11 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
     "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "compression": "zlib"
+      }
+    },
     "resources": {
       "../native/runtime/windows/nstrans-meiki-ocr.exe": "runtime/nstrans-meiki-ocr.exe"
     }

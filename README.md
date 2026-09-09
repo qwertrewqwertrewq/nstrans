@@ -107,7 +107,7 @@ npm run android:build:remote
 
 ## Windows 构建
 
-Windows x64 客户端只使用 MeikiOCR，不加载 Apple Vision 或 Tesseract 回退。TranslateGemma 使用随应用分发的 Ollama 运行时，用户可在控制台选择 Ollama 的 CUDA、Vulkan 或 CPU 推理后端；选择会保存在本机并在切换后重启模型进程。MeikiOCR、模型管理、三种后端选择和 NSIS 打包均已完成接入。
+Windows x64 客户端只使用 MeikiOCR，不加载 Apple Vision 或 Tesseract 回退。TranslateGemma 使用随应用分发的 Ollama 运行时，用户可在控制台选择 Ollama 的 CUDA、Vulkan 或 CPU 推理后端；选择会保存在本机并在切换后重启模型进程。WithLlama 安装包内置 CPU、Vulkan 与 CUDA 13 后端；旧版 NVIDIA 驱动无法使用 CUDA 13 时应选择 Vulkan，或更新显卡驱动。MeikiOCR、模型管理、三种后端选择和 NSIS 打包均已完成接入。
 
 Windows 同样提供完整版和不打包本地 llama/Ollama 的远程版：
 

@@ -14,6 +14,7 @@ concurrency:
 
 env:
   OLLAMA_VERSION: 0.12.3
+  WINDOWS_OLLAMA_VERSION: 0.33.3
 
 jobs:
   macos:
@@ -165,21 +166,30 @@ jobs:
       - name: Install dependencies and native runtimes
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           npm ci --ignore-scripts
-          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:OLLAMA_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:WINDOWS_OLLAMA_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build WithLlama installer
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           npm run windows:build:full
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force artifacts/WithLlama | Out-Null
-          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop | Select-Object -First 1
+          if (-not $Source) { throw "WithLlama NSIS installer was not produced." }
           Copy-Item $Source.FullName artifacts/WithLlama/NSTrans-Windows-x64-WithLlama-setup.exe
       - name: Build RemoteOnly installer
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           npm run windows:build:remote
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force artifacts/RemoteOnly | Out-Null
-          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop | Select-Object -First 1
+          if (-not $Source) { throw "RemoteOnly NSIS installer was not produced." }
           Copy-Item $Source.FullName artifacts/RemoteOnly/NSTrans-Windows-x64-RemoteOnly-setup.exe
       - uses: actions/upload-artifact@v4
         with:
