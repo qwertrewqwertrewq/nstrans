@@ -16,7 +16,7 @@ import { PresentationToolbar } from './components/PresentationToolbar'
 import { SelectionOverlay } from './components/SelectionOverlay'
 import { offsetTextRegions, selectionCanvasRect, type NormalizedSelection } from './services/presentationGeometry'
 import type { LatencySample, OcrSettings, OverlaySettings, TextRegion, TranslationEngineId, TranslationRoutingSettings } from './types'
-import { entitySearchEngineLabels, loadEntitySearchSettings, remoteModelCredentials, saveEntitySearchSettings, type EntitySearchEngineId } from './services/entitySearchSettings'
+import { DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, entitySearchEngineLabels, loadEntitySearchSettings, remoteModelCredentials, resolveSearchKeywords, saveEntitySearchSettings, type EntitySearchEngineId } from './services/entitySearchSettings'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { clearDiagnosticLog, diagnosticLogEntries, subscribeDiagnosticLog, writeDiagnosticLog, type DiagnosticLogEntry } from './services/diagnosticLog'
@@ -1005,6 +1005,7 @@ function App() {
     routing.gameId,
   )
   const selectedGame = getGameProfile(routing.gameId)
+  const effectiveSearchKeywords = useMemo(() => resolveSearchKeywords(routing.entitySearch, selectedGame.searchNames), [routing.entitySearch, selectedGame.searchNames])
   const presentationMode = expandedPreview || fullscreenPreview
   const selectGame = (gameId: GameId) => {
     setDictionaryReady(false)
@@ -1768,6 +1769,60 @@ function App() {
                 </button>
               </div>
               {routing.translationStrategy === 'direct' && <div className="notice">当前为 OCR 原文直送模式：自动词库匹配、术语搜索与学习上传均已暂停；视觉 OCR 兜底不受影响。</div>}
+              <div className="prompt-config">
+                <label>搜索与翻译上下文</label>
+                <div className="segmented">
+                  <button className={routing.entitySearch.keywordMode === 'current-game' ? 'active' : ''} onClick={() => updateEntitySearch({ keywordMode: 'current-game' })}>跟随当前游戏</button>
+                  <button className={routing.entitySearch.keywordMode === 'custom' ? 'active' : ''} onClick={() => updateEntitySearch({ keywordMode: 'custom' })}>自定义关键词</button>
+                </div>
+                {routing.entitySearch.keywordMode === 'custom' && (
+                  <textarea
+                    value={routing.entitySearch.customKeywords}
+                    onChange={(event) => updateEntitySearch({ customKeywords: event.target.value })}
+                    placeholder="每行或用逗号分隔，例如：最终幻想 VII 重制版，克劳德"
+                    aria-label="自定义游戏搜索关键词"
+                    rows={3}
+                  />
+                )}
+                <small className="muted">当前实际关键词：{effectiveSearchKeywords.join(' / ') || '未设置'}</small>
+                <label>传统搜索 API 查询模板</label>
+                <textarea
+                  value={routing.entitySearch.traditionalSearchTemplate}
+                  onChange={(event) => updateEntitySearch({ traditionalSearchTemplate: event.target.value })}
+                  rows={2}
+                  aria-label="传统搜索查询模板"
+                />
+                <small className="muted">Wiki、Brave 与百度千帆共同使用；可用变量：{'{game}'}（首选游戏名）、{'{keywords}'}（全部关键词）、{'{term}'}。</small>
+                <label>联网 LLM 术语搜索提示</label>
+                <textarea
+                  value={routing.entitySearch.llmSearchPromptTemplate}
+                  onChange={(event) => updateEntitySearch({ llmSearchPromptTemplate: event.target.value })}
+                  rows={5}
+                  aria-label="联网 LLM 搜索提示"
+                />
+                <small className="muted">用于千问搜索模型；JSON 返回格式由程序固定追加，不会被覆盖。</small>
+                <label>核心翻译附加要求</label>
+                <textarea
+                  value={routing.entitySearch.translationInstruction}
+                  onChange={(event) => updateEntitySearch({ translationInstruction: event.target.value })}
+                  placeholder="留空使用默认翻译提示；例如：人名采用大陆官方译名，语气保持简短。"
+                  rows={3}
+                  aria-label="核心翻译附加要求"
+                />
+                <small className="muted">同时应用于本机 TranslateGemma 和远程 LLM；基础防扩写、禁残留日文与输出格式规则始终保留。</small>
+                <button
+                  className="secondary"
+                  onClick={() => updateEntitySearch({
+                    keywordMode: 'current-game',
+                    customKeywords: '',
+                    traditionalSearchTemplate: DEFAULT_TRADITIONAL_SEARCH_TEMPLATE,
+                    llmSearchPromptTemplate: DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE,
+                    translationInstruction: '',
+                  })}
+                >
+                  恢复默认提示与关键词
+                </button>
+              </div>
               <div className="inline-select">
                 <label>主搜索引擎</label>
                 <div className="select-wrap">

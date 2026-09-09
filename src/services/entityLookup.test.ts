@@ -1,11 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
 import { buildEntitySearchQuery, ConfigurableEntityLookup, EntityLearningQueue, extractEntityCandidates, WikimediaEntityLookup } from './entityLookup'
 import { TranslationMemory } from './translationMemory'
-import { defaultEntitySearchSettings } from './entitySearchSettings'
+import { defaultEntitySearchSettings, resolveSearchKeywords } from './entitySearchSettings'
 
 describe('entity lookup', () => {
   it('builds every web query with the selected game name and source term', () => {
     expect(buildEntitySearchQuery('グチニザ', ['ゼルダの伝説', '塞尔达传说 王国之泪'])).toBe('塞尔达传说 王国之泪 "グチニザ" 中文 译名')
+  })
+
+  it('uses custom keywords and a custom template for traditional search APIs', async () => {
+    const wiki = { lookup: vi.fn(async () => ({ source: 'クラウド', status: 'missing' as const })) }
+    const web = { search: vi.fn(async () => []) }
+    const settings = {
+      ...defaultEntitySearchSettings,
+      primary: 'brave' as const,
+      fallback: 'none' as const,
+      braveApiKey: 'key',
+      keywordMode: 'custom' as const,
+      customKeywords: '最终幻想 VII 重制版, 克劳德',
+      traditionalSearchTemplate: 'site:example.com {keywords} [{term}]',
+    }
+    await new ConfigurableEntityLookup(wiki, web).lookup('クラウド', { gameNames: ['默认游戏'], searchSettings: settings })
+    expect(resolveSearchKeywords(settings, ['默认游戏'])).toEqual(['最终幻想 VII 重制版', '克劳德'])
+    expect(web.search).toHaveBeenCalledWith('brave', 'site:example.com 最终幻想 VII 重制版 / 克劳德 [クラウド]', 'key')
   })
 
   it('searches only the extracted katakana term and never the complete OCR label', async () => {

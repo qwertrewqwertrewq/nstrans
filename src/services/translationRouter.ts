@@ -6,7 +6,7 @@ import { DictionaryPackRepository } from './dictionaryPacks'
 import type { ConversationTurn, RuntimeRequest, TranslationRuntime } from './translationRuntime'
 import { validateTranslation } from './translationQuality'
 import { getGameProfile } from '../gameAdapters/registry'
-import { defaultEntitySearchSettings, remoteModelCredentials, type EntitySearchEngineId } from './entitySearchSettings'
+import { defaultEntitySearchSettings, remoteModelCredentials, resolveSearchKeywords, type EntitySearchEngineId } from './entitySearchSettings'
 import { writeDiagnosticLog } from './diagnosticLog'
 import { qwenVisionFallback } from './qwenFlash'
 
@@ -114,7 +114,8 @@ export class TranslationRouter {
 
   async researchTerminology(sources: readonly string[], settings: TranslationRoutingSettings, engine: EntitySearchEngineId) {
     const profile = getGameProfile(settings.gameId)
-    await this.entityLearner?.resolve(sources, settings.gameId, profile.searchNames, 0, { ...settings.entitySearch, primary: engine, fallback: 'none' }, true)
+    const searchKeywords = resolveSearchKeywords(settings.entitySearch, profile.searchNames)
+    await this.entityLearner?.resolve(sources, settings.gameId, searchKeywords, 0, { ...settings.entitySearch, primary: engine, fallback: 'none' }, true)
     return sources.flatMap((source) => {
       const entry = this.memory.entity(settings.gameId, source)
       return entry?.status === 'learned' && entry.target
@@ -139,6 +140,7 @@ export class TranslationRouter {
     const remote = remoteModelCredentials(settings.entitySearch, 'vision')
     if (!remote?.apiKey) throw new Error('请先配置可用的多模态模型和 API Key')
     const profile = getGameProfile(settings.gameId)
+    const searchKeywords = resolveSearchKeywords(settings.entitySearch, profile.searchNames)
     const learned: Array<{ source: string; target: string }> = []
     for (const item of items.slice(0, 8)) {
       const result = await qwenVisionFallback({
@@ -146,7 +148,7 @@ export class TranslationRouter {
         candidates: item.candidates,
         imageDataUrl: item.imageDataUrl,
         gameId: settings.gameId,
-        gameNames: profile.searchNames,
+        gameNames: searchKeywords,
         ...remote,
       })
       for (const entry of result?.entries ?? []) {
@@ -195,6 +197,8 @@ export class TranslationRouter {
     if (hasContextualInput && this.lastLongTextAt && now - this.lastLongTextAt > settings.contextResetSeconds * 1000) this.resetContext()
     const useKnowledge = settings.translationStrategy !== 'direct'
     const runtimeId: TranslationEngineId = settings.coreTranslationEngine === 'remote' ? 'remote-llm' : 'translategemma'
+    const profile = getGameProfile(settings.gameId)
+    const searchKeywords = resolveSearchKeywords(settings.entitySearch, profile.searchNames)
     requests.forEach((request, index) => {
       if (!useKnowledge) {
         const cached = this.directVisionCache.get(request.text.normalize('NFKC').replace(/\s+/gu, ''))
@@ -220,7 +224,6 @@ export class TranslationRouter {
     })
 
     if (useKnowledge && settings.entityLookupEnabled && unresolved.length) {
-      const profile = getGameProfile(settings.gameId)
       const candidates = unresolved.flatMap(({ request }) =>
         extractKatakanaCandidates(request.text)
           .flatMap((term) => this.dictionaries.unresolvedKatakanaParts(settings.gameId, term))
@@ -232,7 +235,7 @@ export class TranslationRouter {
       // Candidates already confirmed empty are reserved for visual fallback
       // instead of immediately repeating the same web search.
       const searchCandidates = candidates.filter((term) => !this.memory.entityLookupWasEmpty(settings.gameId, term))
-      void this.entityLearner?.resolve(searchCandidates, settings.gameId, profile.searchNames, 13_000, settings.entitySearch)
+      void this.entityLearner?.resolve(searchCandidates, settings.gameId, searchKeywords, 13_000, settings.entitySearch)
 
       const visionRemote = remoteModelCredentials(settings.entitySearch, 'vision')
       if (settings.entitySearch.visionFallbackEnabled && visionRemote?.apiKey) {
@@ -260,7 +263,7 @@ export class TranslationRouter {
             candidates: requestCandidates,
             imageDataUrl: request.imageDataUrl,
             gameId: settings.gameId,
-            gameNames: profile.searchNames,
+            gameNames: searchKeywords,
             ...visionRemote,
           })
             .then((result) => {
@@ -304,14 +307,13 @@ export class TranslationRouter {
 
     if (!useKnowledge && settings.entitySearch.visionFallbackEnabled && unresolved.length) {
       const visionRemote = remoteModelCredentials(settings.entitySearch, 'vision')
-      const profile = getGameProfile(settings.gameId)
       if (visionRemote?.apiKey) for (const { request } of unresolved) {
         if (this.visionInFlight.size >= 2 || !request.imageDataUrl) break
         const compactText = request.text.normalize('NFKC').replace(/\s+/gu, '')
         const candidates = extractKatakanaCandidates(request.text)
         if (!candidates.length || this.visionInFlight.has(compactText)) continue
         this.visionInFlight.add(compactText)
-        void qwenVisionFallback({ observedText: request.text, candidates, imageDataUrl: request.imageDataUrl, gameId: settings.gameId, gameNames: profile.searchNames, ...visionRemote })
+        void qwenVisionFallback({ observedText: request.text, candidates, imageDataUrl: request.imageDataUrl, gameId: settings.gameId, gameNames: searchKeywords, ...visionRemote })
           .then((result) => { if (result?.translation && validateTranslation(request.text, result.translation, request.targetLanguage).valid) this.directVisionCache.set(compactText, { translation: result.translation, expiresAt: Date.now() + 30_000 }) })
           .catch((reason) => writeDiagnosticLog('LLM', '直送模式 OCR 视觉兜底失败', reason instanceof Error ? reason.message : String(reason), 'error'))
           .finally(() => this.visionInFlight.delete(compactText))
@@ -352,6 +354,8 @@ export class TranslationRouter {
         glossary,
         research,
         remoteModel,
+        gameNames: searchKeywords,
+        translationInstruction: settings.entitySearch.translationInstruction,
       })
       pending.forEach(({ request }, position) => {
         translations[position] = enforceMatchedGlossary(request.text, translations[position] ?? '', glossary)
@@ -368,6 +372,8 @@ export class TranslationRouter {
           research,
           correction: `The rejected output contained untranslated Japanese or was empty (${[...new Set(invalid.map(({ reason }) => reason))].join('; ')}). Translate every component, including unknown katakana proper nouns.`,
           remoteModel,
+          gameNames: searchKeywords,
+          translationInstruction: settings.entitySearch.translationInstruction,
         })
         invalid.forEach(({ position, request }, repairPosition) => {
           const candidate = enforceMatchedGlossary(request.text, repaired[repairPosition] ?? '', glossary)

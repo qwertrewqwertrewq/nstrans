@@ -1,4 +1,5 @@
 export type EntitySearchEngineId = 'wiki' | 'brave' | 'qianfan' | 'qwen'
+export type SearchKeywordMode = 'current-game' | 'custom'
 export type RemoteModelCapability = 'multimodal-search' | 'search-only' | 'offline'
 export type RemoteModelProfile = {
   id: string
@@ -41,7 +42,18 @@ export type EntitySearchSettings = {
   coreModelId: string
   visionFallbackEnabled: boolean
   visionModelId: string
+  keywordMode: SearchKeywordMode
+  customKeywords: string
+  traditionalSearchTemplate: string
+  llmSearchPromptTemplate: string
+  translationInstruction: string
 }
+
+export const DEFAULT_TRADITIONAL_SEARCH_TEMPLATE = '{game} "{term}" 中文 译名'
+export const DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE = `你是游戏日中术语检索器。请联网核对日文专有名词的官方或通行简体中文译名。
+游戏或检索关键词：{keywords}
+待查词：{term}
+找不到可靠译名时 target 必须为空；不得猜测、扩写成句子或返回无关内容。`
 
 export const defaultEntitySearchSettings: EntitySearchSettings = {
   primary: 'wiki',
@@ -55,6 +67,11 @@ export const defaultEntitySearchSettings: EntitySearchSettings = {
   coreModelId: 'preset:qwen3.8-flash',
   visionFallbackEnabled: false,
   visionModelId: 'preset:qwen3.8-flash',
+  keywordMode: 'current-game',
+  customKeywords: '',
+  traditionalSearchTemplate: DEFAULT_TRADITIONAL_SEARCH_TEMPLATE,
+  llmSearchPromptTemplate: DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE,
+  translationInstruction: '',
 }
 
 const STORAGE_KEY = 'yomilens.entity-search.v1'
@@ -80,10 +97,37 @@ export function loadEntitySearchSettings(): EntitySearchSettings {
       coreModelId: typeof stored.coreModelId === 'string' && models.some(({ id, capability }) => id === stored.coreModelId && capability !== 'offline') ? stored.coreModelId : 'preset:qwen3.8-flash',
       visionFallbackEnabled: stored.visionFallbackEnabled === true,
       visionModelId: typeof stored.visionModelId === 'string' && models.some(({ id, capability }) => id === stored.visionModelId && capability === 'multimodal-search') ? stored.visionModelId : legacyVision,
+      keywordMode: stored.keywordMode === 'custom' ? 'custom' : 'current-game',
+      customKeywords: typeof stored.customKeywords === 'string' ? stored.customKeywords : '',
+      traditionalSearchTemplate: typeof stored.traditionalSearchTemplate === 'string' && stored.traditionalSearchTemplate.trim() ? stored.traditionalSearchTemplate : DEFAULT_TRADITIONAL_SEARCH_TEMPLATE,
+      llmSearchPromptTemplate: typeof stored.llmSearchPromptTemplate === 'string' && stored.llmSearchPromptTemplate.trim() ? stored.llmSearchPromptTemplate : DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE,
+      translationInstruction: typeof stored.translationInstruction === 'string' ? stored.translationInstruction : '',
     }
   } catch {
     return defaultEntitySearchSettings
   }
+}
+
+export function parseSearchKeywords(value: string) {
+  return [...new Set(value.split(/[\n,，;；]+/u).map((item) => item.trim()).filter(Boolean))].slice(0, 12)
+}
+
+export function resolveSearchKeywords(settings: EntitySearchSettings, currentGameNames: readonly string[]) {
+  if (settings.keywordMode === 'custom') {
+    const custom = parseSearchKeywords(settings.customKeywords)
+    if (custom.length) return custom
+  }
+  return [...currentGameNames]
+}
+
+export function renderSearchTemplate(template: string, term: string, gameNames: readonly string[]) {
+  const preferredGame = gameNames.find((name) => /\p{Script=Han}/u.test(name) && !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) ?? gameNames[0] ?? '未知游戏'
+  const keywords = gameNames.join(' / ') || preferredGame
+  return template
+    .replaceAll('{game}', preferredGame)
+    .replaceAll('{keywords}', keywords)
+    .replaceAll('{term}', term)
+    .trim()
 }
 
 export function saveEntitySearchSettings(settings: EntitySearchSettings) {

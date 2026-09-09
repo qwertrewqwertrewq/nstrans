@@ -17,6 +17,8 @@ export type RuntimeRequest = {
   glossary?: GlossaryEntry[]
   research?: TerminologyResearch[]
   correction?: string
+  gameNames?: readonly string[]
+  translationInstruction?: string
   remoteModel?: { apiKey: string; model: string; endpoint?: string; capability: RemoteModelCapability }
 }
 export interface TranslationRuntime {
@@ -59,14 +61,14 @@ const translateGemmaRuntime: TranslationRuntime = {
     writeDiagnosticLog('LLM', '运行时状态', available ? 'TranslateGemma 已连接' : 'TranslateGemma 不可用', available ? 'success' : 'warning', 5_000)
     return available
   },
-  translateMany: async ({ requests, history = [], glossary, research, correction }) => {
+  translateMany: async ({ requests, history = [], glossary, research, correction, gameNames, translationInstruction }) => {
     writeDiagnosticLog('LLM', '发送翻译请求', `${requests.length} 条 · 上下文 ${history.length} 轮 · 术语 ${glossary?.length ?? 0} 条${correction ? ' · 纠错重试' : ''}`, 'info')
-    if (!isTauri()) return post('/api/translategemma', { texts: requests.map(({ text }) => text), history, glossary, research, correction })
+    if (!isTauri()) return post('/api/translategemma', { texts: requests.map(({ text }) => text), history, glossary, research, correction, gameNames, translationInstruction })
     const context = history.flatMap((turn) => turn.sources.map((source, index) => `${source} → ${turn.translations[index] ?? ''}`))
     if (requests.length > 1) {
       const startedAt = performance.now()
       try {
-        const prompt = buildTranslateGemmaBatchPrompt({ sources: requests.map(({ text }) => text), glossary, research, context, correction })
+        const prompt = buildTranslateGemmaBatchPrompt({ sources: requests.map(({ text }) => text), glossary, research, context, correction, gameNames, translationInstruction })
         const result = await invoke<{ translation: string }>('translategemma_generate', { prompt })
         const raw = result.translation.trim().replace(/^```(?:json)?\s*/iu, '').replace(/\s*```$/u, '')
         const arrayText = raw.slice(raw.indexOf('['), raw.lastIndexOf(']') + 1)
@@ -83,7 +85,7 @@ const translateGemmaRuntime: TranslationRuntime = {
     for (const [index, request] of requests.entries()) {
       const startedAt = performance.now()
       try {
-        const prompt = buildTranslateGemmaPrompt({ source: request.text, glossary, research, context, correction })
+        const prompt = buildTranslateGemmaPrompt({ source: request.text, glossary, research, context, correction, gameNames, translationInstruction })
         const result = await invoke<{ translation: string }>('translategemma_generate', { prompt })
         translations.push(result.translation)
         context.push(`${request.text} → ${result.translation}`)
@@ -99,11 +101,11 @@ const translateGemmaRuntime: TranslationRuntime = {
 
 const remoteLlmRuntime: TranslationRuntime = {
   id: 'remote-llm', label: '远程 LLM', available: async () => true,
-  translateMany: async ({ requests, history, glossary, correction, remoteModel }) => {
+  translateMany: async ({ requests, history, glossary, correction, remoteModel, gameNames, translationInstruction }) => {
     if (!remoteModel?.apiKey) throw new Error('远程核心模型缺少 API Key')
     const startedAt = performance.now()
     writeDiagnosticLog('LLM', '发送远程翻译请求', `${remoteModel.model} · ${requests.length} 条 · 上下文 ${history?.length ?? 0} 轮 · 术语 ${glossary?.length ?? 0} 条`, 'info')
-    const translations = await qwenTranslateMany({ texts: requests.map(({ text }) => text), history, glossary, correction, ...remoteModel })
+    const translations = await qwenTranslateMany({ texts: requests.map(({ text }) => text), history, glossary, correction, gameNames, translationInstruction, ...remoteModel })
     writeDiagnosticLog('LLM', '远程翻译响应', `${remoteModel.model} · ${translations.length} 条 · ${Math.round(performance.now() - startedAt)} ms`, 'success')
     return translations
   },

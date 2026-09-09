@@ -35,4 +35,11 @@ describe('TranslateGemma prompt', () => {
     expect(prompt).toContain('game terminology evidence')
     expect(prompt).toContain('神庙名称资料')
   })
+
+  it('passes effective game keywords and custom translation preferences without replacing output rules', () => {
+    const prompt = buildTranslateGemmaPrompt({ source: 'クラウド', gameNames: ['最终幻想 VII 重制版'], translationInstruction: '采用官方简体中文人名' })
+    expect(prompt).toContain('Game or context keywords: 最终幻想 VII 重制版')
+    expect(prompt).toContain('采用官方简体中文人名')
+    expect(prompt).toContain('Produce only the Simplified Chinese translation')
+  })
 })

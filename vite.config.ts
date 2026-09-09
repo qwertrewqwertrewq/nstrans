@@ -134,6 +134,8 @@ async function runTranslateGemma(body: string) {
       sourceUrls: string[]
     }>
     correction?: string
+    gameNames?: string[]
+    translationInstruction?: string
   }
   const texts = payload.texts ?? []
   const context: string[] = (payload.history ?? []).flatMap((turn) => turn.sources.map((source, index) => `${source} → ${turn.translations[index] ?? ''}`))
@@ -145,6 +147,8 @@ async function runTranslateGemma(body: string) {
       research: payload.research,
       context,
       correction: payload.correction,
+      gameNames: payload.gameNames,
+      translationInstruction: payload.translationInstruction,
     })
     const response = await fetch('http://127.0.0.1:11434/api/chat', {
       method: 'POST',

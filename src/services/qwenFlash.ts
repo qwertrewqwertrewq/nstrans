@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import type { GameId } from '../gameAdapters/types'
-import type { RemoteModelCapability } from './entitySearchSettings'
+import { DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, renderSearchTemplate, type RemoteModelCapability } from './entitySearchSettings'
 import { containsJapaneseKana } from './translationQuality'
 import { writeDiagnosticLog } from './diagnosticLog'
 
@@ -40,10 +40,14 @@ async function requestQwen(model: string, apiKey: string, prompt: string, imageD
   return body.content
 }
 
-export async function qwenTranslateMany(input: { texts: readonly string[]; history?: readonly { sources: string[]; translations: string[] }[]; glossary?: readonly { source: string; target: string }[]; correction?: string; apiKey: string; model: string; endpoint?: string; capability: RemoteModelCapability }) {
+export function buildQwenTranslationPrompt(input: { texts: readonly string[]; history?: readonly { sources: string[]; translations: string[] }[]; glossary?: readonly { source: string; target: string }[]; correction?: string; gameNames?: readonly string[]; translationInstruction?: string }) {
   const context = (input.history ?? []).slice(-8).flatMap((turn) => turn.sources.map((source, index) => `${source} → ${turn.translations[index] ?? ''}`))
   const terms = (input.glossary ?? []).slice(0, 80).map((entry) => `${entry.source} → ${entry.target}`)
-  const prompt = `你是日文游戏文本翻译器。把每条输入直接翻译为简体中文，不要解释、续写、添加“现在/我们/这意味着”等原文不存在的内容。简单名词只输出名词译名。保持输入数量和顺序。${terms.length ? `\n必须使用术语：${terms.join('；')}` : ''}${context.length ? `\n近期对话上下文：${context.join('\n')}` : ''}${input.correction ? `\n上次输出未通过检查，请修正：${input.correction}` : ''}\n输入：${JSON.stringify(input.texts)}\n只输出 JSON：{"translations":["译文1","译文2"]}`
+  return `你是日文游戏文本翻译器。把每条输入直接翻译为简体中文，不要解释、续写、添加“现在/我们/这意味着”等原文不存在的内容。简单名词只输出名词译名。保持输入数量和顺序。${input.gameNames?.length ? `\n当前游戏或上下文关键词：${input.gameNames.join(' / ')}` : ''}${input.translationInstruction?.trim() ? `\n用户附加翻译要求：${input.translationInstruction.trim()}` : ''}${terms.length ? `\n必须使用术语：${terms.join('；')}` : ''}${context.length ? `\n近期对话上下文：${context.join('\n')}` : ''}${input.correction ? `\n上次输出未通过检查，请修正：${input.correction}` : ''}\n输入：${JSON.stringify(input.texts)}\n只输出 JSON：{"translations":["译文1","译文2"]}`
+}
+
+export async function qwenTranslateMany(input: { texts: readonly string[]; history?: readonly { sources: string[]; translations: string[] }[]; glossary?: readonly { source: string; target: string }[]; correction?: string; gameNames?: readonly string[]; translationInstruction?: string; apiKey: string; model: string; endpoint?: string; capability: RemoteModelCapability }) {
+  const prompt = buildQwenTranslationPrompt(input)
   const raw = parseJsonObject(await requestQwen(input.model, input.apiKey, prompt, undefined, false, input.endpoint, input.capability))
   const translations = Array.isArray(raw.translations) ? raw.translations.map((value) => typeof value === 'string' ? value.trim() : '') : []
   if (translations.length !== input.texts.length || translations.some((value) => !value)) throw new Error(`远程 LLM 返回数量不符（预期 ${input.texts.length} 条）`)
@@ -93,8 +97,9 @@ export async function qwenSearchTerm(
     endpoint?: string
     capability: RemoteModelCapability
   },
+  promptTemplate = DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE,
 ) {
-  const prompt = `你是游戏日中术语检索器。请使用联网搜索核对日文专有名词的官方或通行简体中文译名。\n游戏：${gameNames.join(' / ') || '未知'}\n待查词：${source}\n只输出 JSON：{"canonicalSource":"日文正确写法","target":"简体中文短译名","confidence":0到1,"evidence":["极短依据"]}。找不到可靠译名时 target 必须为空。不得输出解释、句子扩写或猜测。`
+  const prompt = `${renderSearchTemplate(promptTemplate.trim() || DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, source, gameNames)}\n只输出 JSON：{"canonicalSource":"日文正确写法","target":"简体中文短译名","confidence":0到1,"evidence":["极短依据"]}。JSON 字段和格式不可省略。`
   const raw = parseJsonObject(await requestQwen(remote.model, remote.apiKey, prompt, undefined, true, remote.endpoint, remote.capability))
   const canonicalSource = safeTerm(raw.canonicalSource, 40) || source
   const target = safeTerm(raw.target, 60)

@@ -1189,6 +1189,39 @@
 .search-config > input::placeholder {
   color: #58647a;
 }
+.prompt-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(8, 12, 20, 0.35);
+}
+.prompt-config > label {
+  color: #aeb8ca;
+  font-size: 9px;
+}
+.prompt-config textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid #273246;
+  border-radius: 6px;
+  outline: none;
+  background: #090f19;
+  color: #e8edf7;
+  padding: 8px 9px;
+  font: inherit;
+  line-height: 1.5;
+}
+.prompt-config textarea:focus {
+  border-color: #7399ff;
+  outline: 1px solid #7399ff;
+}
+.prompt-config textarea::placeholder {
+  color: #58647a;
+}
 .model-manager {
   display: flex;
   flex-direction: column;

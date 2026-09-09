@@ -2,7 +2,7 @@ import type { GameId } from '../gameAdapters/types'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { normalizeMemoryText, type StoredEntity, type TranslationMemory } from './translationMemory'
 import type { TerminologyResearch } from './translationRuntime'
-import { defaultEntitySearchSettings, remoteModelCredentials, searchEngineKey, type EntitySearchEngineId, type EntitySearchSettings } from './entitySearchSettings'
+import { DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, defaultEntitySearchSettings, remoteModelCredentials, renderSearchTemplate, resolveSearchKeywords, searchEngineKey, type EntitySearchEngineId, type EntitySearchSettings } from './entitySearchSettings'
 import { writeDiagnosticLog } from './diagnosticLog'
 import { qwenSearchTerm } from './qwenFlash'
 
@@ -72,7 +72,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     if (!exact || !linkedTitle) {
       const wikidata = await this.lookupWikidata(source, candidate)
       if (wikidata.status === 'learned') return wikidata
-      return await this.contextualSearch(source, context.gameNames ?? [], wikidata)
+      return await this.contextualSearch(source, context.gameNames ?? [], wikidata, context.searchSettings?.traditionalSearchTemplate)
     }
 
     const chineseTitle = await this.toSimplifiedChineseTitle(linkedTitle)
@@ -140,12 +140,12 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     }
   }
 
-  private async contextualSearch(source: string, gameNames: readonly string[], fallback: EntityLookupResult): Promise<EntityLookupResult> {
+  private async contextualSearch(source: string, gameNames: readonly string[], fallback: EntityLookupResult, queryTemplate = DEFAULT_TRADITIONAL_SEARCH_TEMPLATE): Promise<EntityLookupResult> {
     if (!gameNames.length) return fallback
     const localizedNames = [gameNames.find((name) => /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) ?? gameNames[0], gameNames.find((name) => /\p{Script=Han}/u.test(name) && !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) ?? gameNames.at(-1)!]
     const searches = await Promise.all(
       ['ja', 'zh'].map(async (language, index) => {
-        const query = `${localizedNames[index]} "${source}"`
+        const query = buildEntitySearchQuery(source, [localizedNames[index]], queryTemplate)
         const url = new URL(`https://${language}.wikipedia.org/w/api.php`)
         url.search = new URLSearchParams({
           action: 'query',
@@ -228,15 +228,17 @@ export class ConfigurableEntityLookup implements EntityLookupProvider {
 
   async lookup(source: string, context: EntityLookupContext = {}): Promise<EntityLookupResult> {
     const settings = context.searchSettings ?? defaultEntitySearchSettings
+    const gameNames = resolveSearchKeywords(settings, context.gameNames ?? [])
+    const resolvedContext = { ...context, gameNames, searchSettings: settings }
     const engines = [...new Set([settings.primary, settings.fallback])].filter((engine): engine is EntitySearchEngineId => engine !== 'none')
     let last: EntityLookupResult = { source, status: 'missing' }
     for (const engine of engines) {
       const startedAt = performance.now()
-      const query = engine === 'wiki' ? [...(context.gameNames ?? []), source].filter(Boolean).join(' · ') : buildEntitySearchQuery(source, context.gameNames ?? [])
+      const query = buildEntitySearchQuery(source, gameNames, settings.traditionalSearchTemplate)
       writeDiagnosticLog('搜索', '发起查询', `${source} · ${searchEngineLabel(engine)} · ${query}`, 'info')
       let result: EntityLookupResult
       try {
-        result = engine === 'wiki' ? await this.wiki.lookup(source, context) : await this.lookupWeb(engine, source, context.gameNames ?? [], searchEngineKey(settings, engine), settings)
+        result = engine === 'wiki' ? await this.wiki.lookup(source, resolvedContext) : await this.lookupWeb(engine, source, gameNames, searchEngineKey(settings, engine), settings)
         console.info('[entity-search]', {
           engine,
           source,
@@ -266,11 +268,11 @@ export class ConfigurableEntityLookup implements EntityLookupProvider {
 
   private async lookupWeb(engine: Exclude<EntitySearchEngineId, 'wiki'>, source: string, gameNames: readonly string[], apiKey: string, settings: EntitySearchSettings): Promise<EntityLookupResult> {
     if (!apiKey) return { source, status: 'missing' }
-    const query = buildEntitySearchQuery(source, gameNames)
+    const query = buildEntitySearchQuery(source, gameNames, settings.traditionalSearchTemplate)
     if (engine === 'qwen') {
       const remote = remoteModelCredentials(settings, 'search')
       if (!remote) return { source, status: 'missing' }
-      const result = await qwenSearchTerm(source, gameNames, remote)
+      const result = await qwenSearchTerm(source, gameNames, remote, settings.llmSearchPromptTemplate)
       if (!result) return { source, status: 'missing' }
       return {
         source,
@@ -312,10 +314,8 @@ function searchEngineLabel(engine: EntitySearchEngineId) {
   )[engine]
 }
 
-export function buildEntitySearchQuery(source: string, gameNames: readonly string[]) {
-  const chineseName = gameNames.find((name) => /\p{Script=Han}/u.test(name) && !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name))
-  const gameName = chineseName ?? gameNames[0] ?? ''
-  return [gameName, `"${source}"`, '中文 译名'].filter(Boolean).join(' ')
+export function buildEntitySearchQuery(source: string, gameNames: readonly string[], template = DEFAULT_TRADITIONAL_SEARCH_TEMPLATE) {
+  return renderSearchTemplate(template.trim() || DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, source, gameNames)
 }
 
 const stripMarkup = (text: string) =>
