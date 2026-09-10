@@ -26,6 +26,7 @@ import { cropOcrRegionDataUrl } from './services/visionCrop'
 import { TerminologyInspector } from './components/TerminologyInspector'
 import { RemoteModelManager } from './components/RemoteModelManager'
 import { buildTvImagePayload, buildTvTextPayload, connectTv, disconnectTv, listTvDevices, pushTvOverlay, tvConnectionStatus, type TvCastMode, type TvConnectionStatus, type TvDevice } from './services/tvCast'
+import { openPreferredVideoStream, waitForVideoDimensions } from './services/mediaCapture'
 
 const emptyLatency: LatencySample = {
   capture: 0,
@@ -120,6 +121,7 @@ function App() {
     selectionCanvasRef = useRef<HTMLCanvasElement>(null),
     stageRef = useRef<HTMLDivElement>(null)
   const busyRef = useRef(false)
+  const autoCameraAuthorizationStartedRef = useRef(false)
   const pendingFrameRef = useRef<FrameProcessOptions | null>(null)
   const processFrameRef = useRef<(options?: FrameProcessOptions) => Promise<void>>(async () => {})
   const nativeFullscreenOwnedRef = useRef(false)
@@ -414,6 +416,14 @@ function App() {
     return () => observer.disconnect()
   }, [frameSize.sourceHeight, frameSize.sourceWidth])
 
+  const syncMediaFrameSize = useCallback((sourceWidth: number, sourceHeight: number) => {
+    if (sourceWidth <= 1 || sourceHeight <= 1) return
+    const captureSize = fitCaptureSize(sourceWidth, sourceHeight)
+    setFrameSize((current) => current.sourceWidth === sourceWidth && current.sourceHeight === sourceHeight
+      ? current
+      : { sourceWidth, sourceHeight, captureWidth: captureSize.width, captureHeight: captureSize.height })
+  }, [])
+
   const authorizeAndScan = useCallback(async () => {
     if (!navigator.mediaDevices) {
       setError('当前环境不支持摄像头或采集卡访问。')
@@ -440,6 +450,12 @@ function App() {
       setScanning(false)
     }
   }, [refreshDevices, stream])
+
+  useEffect(() => {
+    if (!isTauri() || clientPlatform !== 'macos' || devicePermission !== 'unknown' || autoCameraAuthorizationStartedRef.current) return
+    autoCameraAuthorizationStartedRef.current = true
+    void authorizeAndScan()
+  }, [authorizeAndScan, clientPlatform, devicePermission])
 
   const stopInput = useCallback(async () => {
     if (stream || usbInput.active) writeDiagnosticLog('OCR', '输入源已断开', stream?.getVideoTracks()[0]?.label || usbInput.label || '视频设备', 'warning')
@@ -480,34 +496,33 @@ function App() {
           writeDiagnosticLog('OCR', 'USB UVC 输入已打开', `${result.label} · ${result.width} × ${result.height}`, 'success')
           return
         }
-        const next = await navigator.mediaDevices.getUserMedia({
-          video: requestedDeviceId
-            ? {
-                deviceId: { exact: requestedDeviceId },
-                width: { ideal: 1920 },
-                height: { ideal: 1080 },
-              }
-            : true,
-          audio: false,
-        })
-        setStream(next)
-        const activeDeviceId = next.getVideoTracks()[0]?.getSettings().deviceId
+        if (!navigator.mediaDevices) throw new Error('当前环境不支持摄像头或采集卡访问')
+        const next = await openPreferredVideoStream(navigator.mediaDevices, requestedDeviceId)
+        const track = next.getVideoTracks()[0]
+        const activeDeviceId = track?.getSettings().deviceId
         if (activeDeviceId) setDeviceId(activeDeviceId)
+        let dimensions = { width: track?.getSettings().width ?? 0, height: track?.getSettings().height ?? 0 }
         if (videoRef.current) {
           videoRef.current.srcObject = next
           await videoRef.current.play()
+          const videoDimensions = await waitForVideoDimensions(videoRef.current)
+          if (videoDimensions.width > 1 && videoDimensions.height > 1) dimensions = videoDimensions
         }
+        const sourceWidth = dimensions.width || 1920,
+          sourceHeight = dimensions.height || 1080
+        syncMediaFrameSize(sourceWidth, sourceHeight)
+        setStream(next)
         setRunning(true)
         setDevicePermission('granted')
         await refreshDevices()
-        writeDiagnosticLog('OCR', 'OCR 启动', `${next.getVideoTracks()[0]?.label || '视频设备'} · ${ocr.scanMode} · ${ocr.language}`, 'success')
+        writeDiagnosticLog('OCR', 'OCR 启动', `${track?.label || '视频设备'} · ${sourceWidth} × ${sourceHeight} · ${ocr.scanMode} · ${ocr.language}`, 'success')
       } catch (reason) {
         const message = errorMessage(reason, '无法打开输入源')
         setError(message)
         writeDiagnosticLog('系统', '输入源打开失败', message, 'error')
       }
     },
-    [deviceId, ocr.language, ocr.scanMode, refreshDevices, stopInput],
+    [deviceId, ocr.language, ocr.scanMode, refreshDevices, stopInput, syncMediaFrameSize],
   )
   useEffect(
     () => () => {
@@ -1213,7 +1228,14 @@ function App() {
               </div>
             </div>
             <div className={`video-stage ${expandedPreview ? 'expanded' : ''} ${fullscreenPreview ? 'window-fullscreen' : ''}`} ref={stageRef}>
-              <video ref={videoRef} muted playsInline style={{ display: usbInput.active ? 'none' : undefined }} />
+              <video
+                ref={videoRef}
+                muted
+                playsInline
+                style={{ display: usbInput.active ? 'none' : undefined }}
+                onLoadedMetadata={(event) => syncMediaFrameSize(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+                onResize={(event) => syncMediaFrameSize(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
+              />
               {usbInput.active && <canvas ref={usbDisplayRef} className="usb-video-frame" role="img" aria-label="USB 采集卡实时画面" />}
               <canvas ref={canvasRef} hidden />
               <canvas ref={selectionCanvasRef} hidden />
