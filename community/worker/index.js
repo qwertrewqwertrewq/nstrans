@@ -35,7 +35,7 @@ async function route(request, env) {
   if (/^\/api\/v1\/translations\/\d+$/u.test(path) && request.method === 'PATCH') return apiEditTranslation(request, env, Number(path.split('/')[4]))
   if (/^\/api\/v1\/dictionaries\/[^/]+$/u.test(path) && request.method === 'GET') return dictionary(env, decodeURIComponent(path.split('/')[4]))
   if (path === '/api/v1/contributions' && request.method === 'POST') return uploadContributions(request, env)
-  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client') return servePage(request, env)
+  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
 }
 

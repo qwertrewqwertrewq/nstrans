@@ -144,16 +144,18 @@ npm run windows:build
 src-tauri\target\release\bundle\nsis\NSTrans_0.1.0_x64-setup.exe
 ```
 
-## TranslateGemma 4B 量化版本与兼容限制
+## TranslateGemma 4B 默认模型、来源与兼容限制
 
-各平台使用相同的 TranslateGemma 4B 基础模型，但运行时、量化文件和内存需求不同，不能把“模型名称相同”理解为模型文件可以任意互换：
+Google 官方原始模型仓库是 [`google/translategemma-4b-it`](https://huggingface.co/google/translategemma-4b-it)，提供 Transformers/Safetensors 权重且需要接受 Gemma 使用条款；它不是 NSTrans 移动端直接加载的 GGUF。各平台使用相同的 TranslateGemma 4B 基础模型，但运行时、量化文件、发布方和内存需求不同，不能把“模型名称相同”理解为模型文件可以任意互换：
 
-| 平台 | 默认模型/量化 | 大小参考 | 当前验证情况 |
-|---|---|---:|---|
-| macOS | Ollama 官方 `translategemma:4b`，Q4_K_M | 约 3.3GB | Apple M4、16GB RAM 运行良好 |
-| Windows | Ollama 官方 `translategemma:4b`，Q4_K_M | 约 3.3GB | 已完成内置 Ollama 和三种后端接入 |
-| iPadOS | `mradermacher/translategemma-4b-it-GGUF`，IQ4_XS | 约 2.4GB | Apple M2、8GB RAM 实测可用，效果尚可 |
-| Android | `Qwe1325/translategemma-4b-it-GGUF`，Q4_K_M | 约 2.5GB | 当前默认下载源；受测试设备性能限制，尚未完成实际翻译验证 |
+| 平台 | NSTrans 默认下载/模型 | 来源性质 | 大小参考 | 当前验证情况 |
+|---|---|---|---:|---|
+| macOS | Ollama Library `translategemma:4b`，Q4_K_M | Ollama 官方库包；不是 Google 原始 Safetensors | 约 3.3GB | Apple M4、16GB RAM 运行良好 |
+| Windows | Ollama Library `translategemma:4b`，Q4_K_M | Ollama 官方库包；不是 Google 原始 Safetensors | 约 3.3GB | 已完成内置 Ollama 和三种后端接入 |
+| iPadOS | `mradermacher/translategemma-4b-it-GGUF`，IQ4_XS | 社区转换/量化，非 Google 官方发布 | 约 2.4GB | Apple M2、8GB RAM 实测可用，效果尚可 |
+| Android | `Qwe1325/translategemma-4b-it-GGUF`，Q4_K_M | 社区转换/量化，非 Google 官方发布 | 约 2.5GB | 当前默认下载源；受测试设备性能限制，尚未完成实际翻译验证 |
+
+`RemoteOnly` 构建在所有平台均没有默认本地 TranslateGemma，也不会自动下载上述权重；核心翻译模型完全取决于用户配置的远程 API。`WithLlama` 只表示包含本地运行时，不表示安装包内附带模型权重。
 
 移动端直接使用 `llama-cpp-2`，必须选择与当前 llama.cpp Gemma 3 文本加载器兼容的、完整的 TranslateGemma 文本 GGUF。以下文件不能直接使用：
 

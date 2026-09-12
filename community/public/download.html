@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="下载 NSTrans 跨平台 OCR 翻译客户端">
+  <title>客户端下载 · NSTrans</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/styles.css">
+</head>
+<body data-page="download">
+  <nav class="site-nav">
+    <a class="brand" href="/"><span>NS</span>TRANS</a>
+    <div class="site-links"><a href="/how-it-works">工作方式</a><a href="/client">客户端接入</a><a class="active" href="/download">下载</a><a href="https://github.com/qwertrewqwertrewq/nstrans" target="_blank" rel="noreferrer">GitHub ↗</a><a class="button compact" href="/dashboard">控制面板 <b>↗</b></a></div>
+  </nav>
+  <main class="guide-main download-main">
+    <header class="guide-hero">
+      <span class="kicker">CLIENT RELEASE / 03</span>
+      <h1>选择平台，<br>开始实时翻译。</h1>
+      <p>当前为 Alpha 测试版本。RemoteOnly 体积更小且只使用远程核心模型；WithLlama 包含本地推理运行时，模型权重仍需首次启动后下载或导入。</p>
+    </header>
+    <section class="release-summary">
+      <div><span>当前版本</span><strong>v0.1.0 Alpha</strong></div>
+      <div><span>源代码</span><a href="https://github.com/qwertrewqwertrewq/nstrans" target="_blank" rel="noreferrer">github.com/qwertrewqwertrewq/nstrans ↗</a></div>
+      <a class="button secondary" href="https://github.com/qwertrewqwertrewq/nstrans/releases/tag/v0.1.0" target="_blank" rel="noreferrer">查看完整 Release <b>↗</b></a>
+    </section>
+    <section class="download-grid" aria-label="客户端下载">
+      <article class="release-card"><header><span>01 / DESKTOP</span><h2>macOS</h2><p>Apple Silicon · DMG</p></header><div class="release-actions"><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-macOS-arm64-WithLlama.dmg"><b>WithLlama</b><small>包含本地 Ollama 运行时</small><i>↓</i></a><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-macOS-arm64-RemoteOnly.dmg"><b>RemoteOnly</b><small>仅使用远程核心模型</small><i>↓</i></a></div></article>
+      <article class="release-card"><header><span>02 / DESKTOP</span><h2>Windows</h2><p>Windows 10/11 x64 · NSIS</p></header><div class="release-actions"><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-Windows-x64-WithLlama-setup.exe"><b>WithLlama</b><small>CPU / Vulkan / CUDA</small><i>↓</i></a><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-Windows-x64-RemoteOnly-setup.exe"><b>RemoteOnly</b><small>仅使用远程核心模型</small><i>↓</i></a></div></article>
+      <article class="release-card"><header><span>03 / MOBILE</span><h2>iPadOS</h2><p>arm64 · 未签名 IPA</p></header><div class="release-actions"><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-iPadOS-arm64-unsigned-WithLlama.ipa"><b>WithLlama</b><small>需自签，可导入 GGUF</small><i>↓</i></a><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-iPadOS-arm64-unsigned-RemoteOnly.ipa"><b>RemoteOnly</b><small>需自签，仅远程模型</small><i>↓</i></a></div></article>
+      <article class="release-card"><header><span>04 / MOBILE</span><h2>Android</h2><p>arm64 · 调试签名 APK</p></header><div class="release-actions"><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-Android-arm64-debug-WithLlama.apk"><b>WithLlama</b><small>本地 llama.cpp · 实验性</small><i>↓</i></a><a href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-0.1.0-Android-arm64-debug-RemoteOnly.apk"><b>RemoteOnly</b><small>仅使用远程核心模型</small><i>↓</i></a></div></article>
+    </section>
+    <section class="tv-release"><div><span class="kicker">TV COMPANION</span><h2>NSTrans TV</h2><p>用于 Android 电视的 HDMI 画面与悬浮字幕客户端，与核心翻译客户端分开发行。</p></div><a class="button" href="https://github.com/qwertrewqwertrewq/nstrans/releases/download/v0.1.0/NSTrans-TV-0.2.1-Android-debug.apk">下载 TV APK <b>↓</b></a></section>
+    <aside class="download-notice"><strong>安装前须知</strong><p>macOS 构建未做 Developer ID 公证；iPadOS 需要使用自己的证书自签；Android 使用调试签名。每个核心客户端安装包在 GitHub Release 中均提供同名 `.sha256` 文件。</p></aside>
+  </main>
+  <footer class="simple-footer"><a class="brand" href="/"><span>NS</span>TRANS</a><p><a href="https://github.com/qwertrewqwertrewq/nstrans" target="_blank" rel="noreferrer">开源项目 ↗</a> · Apache-2.0</p></footer>
+</body>
+</html>
