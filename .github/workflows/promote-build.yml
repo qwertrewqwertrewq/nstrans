@@ -1,0 +1,85 @@
+name: Promote platform build artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Cross-platform builds run ID
+        required: true
+        type: string
+      tag:
+        description: Existing GitHub Release tag
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  promote:
+    name: Publish WithLlama and RemoteOnly assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+          pattern: NSTrans-*
+          merge-multiple: true
+          path: downloaded
+
+      - name: Validate, version and checksum assets
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          mkdir -p release-assets
+
+          stage() {
+            source_name="$1"
+            target_name="$2"
+            if [[ ! -f "downloaded/$source_name" ]]; then
+              echo "Required artifact is missing: $source_name" >&2
+              exit 1
+            fi
+            cp "downloaded/$source_name" "release-assets/$target_name"
+            sha256sum "release-assets/$target_name" \
+              | sed 's#release-assets/##' \
+              > "release-assets/$target_name.sha256"
+          }
+
+          stage NSTrans-macOS-arm64-WithLlama.dmg \
+            "NSTrans-$version-macOS-arm64-WithLlama.dmg"
+          stage NSTrans-macOS-arm64-RemoteOnly.dmg \
+            "NSTrans-$version-macOS-arm64-RemoteOnly.dmg"
+          stage NSTrans-iPadOS-arm64-unsigned-WithLlama.ipa \
+            "NSTrans-$version-iPadOS-arm64-unsigned-WithLlama.ipa"
+          stage NSTrans-iPadOS-arm64-unsigned-RemoteOnly.ipa \
+            "NSTrans-$version-iPadOS-arm64-unsigned-RemoteOnly.ipa"
+          stage NSTrans-Android-arm64-debug-WithLlama.apk \
+            "NSTrans-$version-Android-arm64-debug-WithLlama.apk"
+          stage NSTrans-Android-arm64-debug-RemoteOnly.apk \
+            "NSTrans-$version-Android-arm64-debug-RemoteOnly.apk"
+          stage NSTrans-Windows-x64-WithLlama-setup.exe \
+            "NSTrans-$version-Windows-x64-WithLlama-setup.exe"
+          stage NSTrans-Windows-x64-RemoteOnly-setup.exe \
+            "NSTrans-$version-Windows-x64-RemoteOnly-setup.exe"
+
+          find release-assets -maxdepth 1 -type f -print | sort
+
+      - name: Upload assets to existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
