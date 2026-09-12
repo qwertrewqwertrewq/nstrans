@@ -1533,13 +1533,32 @@ function App() {
                 <button className={routing.translationStrategy === 'knowledge-assisted' ? 'active' : ''} onClick={() => updateRoutingMode({ translationStrategy: 'knowledge-assisted' })}>词库、缓存与学习辅助</button>
                 <button className={routing.translationStrategy === 'direct' ? 'active' : ''} onClick={() => updateRoutingMode({ translationStrategy: 'direct' })}>OCR 原文直送 LLM</button>
               </div>
-              <div className="notice">{routing.translationStrategy === 'knowledge-assisted' ? '先匹配远程词库与本地缓存，后台搜索并学习术语，再把原文、上下文和术语提示交给核心模型。' : 'OCR 文字直接交给核心模型；不读取翻译词库/缓存，不自动搜索、不学习入库。远程视觉 OCR 兜底仍可单独启用。'}</div>
+              <div className="notice">{routing.translationStrategy === 'knowledge-assisted' ? '先匹配远程词库与本地缓存，后台搜索并学习术语，再把原文、上下文和术语提示交给核心模型。' : 'OCR 文字直接交给核心模型；不读取翻译词库/缓存，不自动搜索、不学习入库。远程视觉识别仍可单独启用。'}</div>
               <label>核心翻译模型</label>
               <div className="segmented">
                 {localRuntimeBundled && <button className={routing.coreTranslationEngine === 'local' ? 'active' : ''} onClick={() => updateRoutingMode({ coreTranslationEngine: 'local' })}>本机 TranslateGemma</button>}
                 <button className={routing.coreTranslationEngine === 'remote' ? 'active' : ''} onClick={() => updateRoutingMode({ coreTranslationEngine: 'remote' })}>远程 LLM</button>
               </div>
-              {routing.coreTranslationEngine === 'remote' && <div className="engine-status"><EngineState label={`远程 LLM · ${remoteModelCredentials(routing.entitySearch, 'core')?.name ?? '未选择模型'}`} ready={Boolean(remoteModelCredentials(routing.entitySearch, 'core')?.apiKey)} /></div>}
+              {routing.coreTranslationEngine === 'remote' && (
+                <div className="remote-core-model">
+                  <div className="inline-select">
+                    <label>远程核心翻译模型</label>
+                    <div className="select-wrap">
+                      <select value={routing.entitySearch.coreModelId} onChange={(event) => updateEntitySearch({ coreModelId: event.target.value })}>
+                        {routing.entitySearch.remoteModels
+                          .filter(({ capability }) => capability !== 'offline')
+                          .map((model) => (
+                            <option value={model.id} key={model.id}>
+                              {model.name} · {model.capability === 'multimodal-search' ? '多模态 + 搜索' : '仅搜索'}
+                            </option>
+                          ))}
+                      </select>
+                      <ChevronDown size={13} />
+                    </div>
+                  </div>
+                  <div className="engine-status"><EngineState label={`远程 LLM · ${remoteModelCredentials(routing.entitySearch, 'core')?.name ?? '未选择模型'}`} ready={Boolean(remoteModelCredentials(routing.entitySearch, 'core')?.apiKey)} /></div>
+                </div>
+              )}
               <div className="inline-select">
                 <label>游戏类别</label>
                 <div className="select-wrap">
@@ -1692,12 +1711,12 @@ function App() {
                     {(routing.entitySearch.primary === 'qwen' || routing.entitySearch.fallback === 'qwen' || routing.entitySearch.visionFallbackEnabled) && <input type="password" value={routing.entitySearch.qwenApiKey ?? ''} onChange={(event) => updateEntitySearch({ qwenApiKey: event.target.value })} placeholder="阿里云百炼 DashScope API Key" aria-label="Qwen API Key" autoComplete="off" />}
                     <div className="toggle-row">
                       <div>
-                        <strong>远程视觉 OCR 兜底</strong>
+                        <strong>远程视觉识别</strong>
                         <small>仅所有术语搜索均为空时上传当前文字局部截图</small>
                       </div>
                       <button
                         className={`toggle ${routing.entitySearch.visionFallbackEnabled ? 'on' : ''}`}
-                        aria-label="远程视觉 OCR 兜底"
+                        aria-label="启用远程视觉识别"
                         onClick={() =>
                           updateEntitySearch({
                             visionFallbackEnabled: !routing.entitySearch.visionFallbackEnabled,
@@ -1709,7 +1728,7 @@ function App() {
                     </div>
                     {routing.entitySearch.visionFallbackEnabled && (
                       <div className="inline-select">
-                        <label>视觉兜底模型</label>
+                        <label>远程视觉模型</label>
                         <div className="select-wrap">
                           <select
                             value={routing.entitySearch.visionModelId}
@@ -1726,7 +1745,7 @@ function App() {
                         </div>
                       </div>
                     )}
-                    <small className="muted">普通外部查询只发送游戏名与片假名候选。视觉兜底默认关闭；打开后仅在搜索链全部为空时发送局部截图、原 OCR 文本与游戏信息。API Key 只保存在本机。</small>
+                    <small className="muted">普通外部查询只发送游戏名与片假名候选。远程视觉识别默认关闭；启用后仅在搜索链全部为空时发送局部截图、原 OCR 文本与游戏信息。API Key 只保存在本机。</small>
                   </div>
                 )}
                 <div className="toggle-row">
@@ -1790,7 +1809,7 @@ function App() {
                   <span />
                 </button>
               </div>
-              {routing.translationStrategy === 'direct' && <div className="notice">当前为 OCR 原文直送模式：自动词库匹配、术语搜索与学习上传均已暂停；视觉 OCR 兜底不受影响。</div>}
+              {routing.translationStrategy === 'direct' && <div className="notice">当前为 OCR 原文直送模式：自动词库匹配、术语搜索与学习上传均已暂停；远程视觉识别不受影响。</div>}
               <div className="prompt-config">
                 <label>搜索与翻译上下文</label>
                 <div className="segmented">
@@ -1893,12 +1912,12 @@ function App() {
               <RemoteModelManager settings={routing.entitySearch} onChange={updateEntitySearch} />
               <div className="toggle-row">
                 <div>
-                  <strong>远程视觉 OCR 兜底</strong>
+                  <strong>远程视觉识别</strong>
                   <small>仅搜索链均为空时发送当前文字局部截图</small>
                 </div>
                 <button
                   className={`toggle ${routing.entitySearch.visionFallbackEnabled ? 'on' : ''}`}
-                  aria-label="远程视觉 OCR 兜底"
+                  aria-label="启用远程视觉识别"
                   onClick={() =>
                     updateEntitySearch({
                       visionFallbackEnabled: !routing.entitySearch.visionFallbackEnabled,
@@ -1925,7 +1944,7 @@ function App() {
                   </button>
                 </div>
               )}
-              <small className="muted">所有密钥仅保存在当前设备；截图只有在开启视觉兜底且常规搜索全部失败后才会发送。</small>
+              <small className="muted">所有密钥仅保存在当前设备；截图只有在启用远程视觉识别且常规搜索全部失败后才会发送。</small>
             </ControlPanel>
           )}
           {visiblePanels.has('overlay') && (

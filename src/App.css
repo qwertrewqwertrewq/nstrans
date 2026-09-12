@@ -1085,6 +1085,15 @@
   flex-direction: column;
   gap: 8px;
 }
+.remote-core-model {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(8, 12, 20, 0.35);
+}
 .remote-model-manager {
   padding: 10px;
   border: 1px solid var(--line);

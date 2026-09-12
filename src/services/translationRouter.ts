@@ -298,7 +298,7 @@ export class TranslationRouter {
               if (result.entries.length) writeDiagnosticLog('词库', 'Qwen OCR 纠错入库', result.entries.map((entry) => `${entry.observed}${entry.observed === entry.canonical ? '' : ` → ${entry.canonical}`} → ${entry.target}`).join('；'), 'success')
             })
             .catch((reason) => {
-              writeDiagnosticLog('LLM', 'Qwen 视觉兜底失败', reason instanceof Error ? reason.message : String(reason), 'error')
+              writeDiagnosticLog('LLM', '远程视觉识别失败', reason instanceof Error ? reason.message : String(reason), 'error')
             })
             .finally(() => this.visionInFlight.delete(visionKey))
         }
@@ -315,7 +315,7 @@ export class TranslationRouter {
         this.visionInFlight.add(compactText)
         void qwenVisionFallback({ observedText: request.text, candidates, imageDataUrl: request.imageDataUrl, gameId: settings.gameId, gameNames: searchKeywords, ...visionRemote })
           .then((result) => { if (result?.translation && validateTranslation(request.text, result.translation, request.targetLanguage).valid) this.directVisionCache.set(compactText, { translation: result.translation, expiresAt: Date.now() + 30_000 }) })
-          .catch((reason) => writeDiagnosticLog('LLM', '直送模式 OCR 视觉兜底失败', reason instanceof Error ? reason.message : String(reason), 'error'))
+          .catch((reason) => writeDiagnosticLog('LLM', '直送模式远程视觉识别失败', reason instanceof Error ? reason.message : String(reason), 'error'))
           .finally(() => this.visionInFlight.delete(compactText))
       }
     }
@@ -345,7 +345,7 @@ export class TranslationRouter {
       const research = useKnowledge ? this.memory.findResearch(settings.gameId, glossaryTexts) : []
       if (glossary.length) writeDiagnosticLog('词库', '术语提示交给 LLM', glossary.map(({ source, target, scope }) => `[${scope}] ${source} → ${target}`).join('；'), 'success', 1_000)
       const remoteModel = runtimeId === 'remote-llm' ? remoteModelCredentials(settings.entitySearch, 'core') : undefined
-      if (runtimeId === 'remote-llm' && !remoteModel?.apiKey) throw new Error('请先在“密钥与远程管理”配置核心远程翻译模型和 API Key')
+      if (runtimeId === 'remote-llm' && !remoteModel?.apiKey) throw new Error('请在“翻译与词库”选择远程核心模型，并在“密钥与远程管理”配置 API Key')
       const runtime = this.runtimes[runtimeId]
       if (!runtime) throw new Error(`翻译运行时不可用：${runtimeId}`)
       const translations = await runtime.translateMany({

@@ -5,7 +5,7 @@ import { entitySearchEngineLabels } from '../services/entitySearchSettings'
 import type { TerminologyItem, TerminologySource } from '../services/translationRouter'
 
 type Sentence = { id: string; source: string; translated: string; confidence: number }
-const tagLabels: Record<TerminologySource, string> = { remote: '远程词库', search: '搜索', 'ocr-fallback': 'OCR 兜底' }
+const tagLabels: Record<TerminologySource, string> = { remote: '远程词库', search: '搜索', 'ocr-fallback': '视觉识别' }
 
 export function TerminologyInspector({ sentences, terms, onEdit, onSearch, onVision }: {
   sentences: Sentence[]

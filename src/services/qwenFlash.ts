@@ -117,9 +117,9 @@ export async function qwenVisionFallback(input: { observedText: string; candidat
   const { observedText, candidates, imageDataUrl, gameNames, apiKey, model } = input
   const prompt = `你是游戏画面 OCR 纠错与日中翻译器。图像仅是 OCR 文本区域的局部截图。\n游戏：${gameNames.join(' / ') || input.gameId}\n本地 OCR 原文：${observedText}\n未查到的片假名候选：${candidates.join('、')}\n任务：结合图像和游戏信息纠正 OCR，再把画面中的完整日文直接翻成简体中文。提取可复用的专有名词或短词；若 OCR 错字与正确日文不同，同时返回错误写法映射。例如 世儿夕→ゼルダ→塞尔达。\n只输出 JSON：{"correctedText":"纠正后的完整日文","translation":"直接简短译文","entries":[{"observed":"本地OCR写法","canonical":"正确日文词","target":"简体中文词"}]}。entries 只能包含独立短词或专名，禁止整段对白、标点和解释；无法确认则返回空 entries。`
   const startedAt = performance.now()
-  writeDiagnosticLog('OCR', '进入 Qwen 视觉兜底', `${model} · ${candidates.join('、')}`, 'warning')
+  writeDiagnosticLog('OCR', '启动远程视觉识别', `${model} · ${candidates.join('、')}`, 'warning')
   const result = parseQwenVisionResponse(await requestQwen(model, apiKey, prompt, imageDataUrl, false, input.endpoint, input.capability), observedText)
   if (!result) return undefined
-  writeDiagnosticLog('LLM', 'Qwen 视觉兜底响应', `${Math.round(performance.now() - startedAt)} ms · 学习 ${result.entries.length} 条`, 'success')
+  writeDiagnosticLog('LLM', '远程视觉识别响应', `${Math.round(performance.now() - startedAt)} ms · 学习 ${result.entries.length} 条`, 'success')
   return result
 }

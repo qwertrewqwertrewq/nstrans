@@ -72,7 +72,7 @@ export function RemoteModelManager({ settings, onChange }: { settings: EntitySea
         </div>
       </div>
       <div className="inline-select">
-        <label>视觉 OCR 兜底模型</label>
+        <label>远程视觉模型</label>
         <div className="select-wrap">
           <select value={settings.visionModelId} onChange={(event) => onChange({ visionModelId: event.target.value })}>
             {visionModels.map((item) => (
@@ -80,15 +80,6 @@ export function RemoteModelManager({ settings, onChange }: { settings: EntitySea
                 {item.name}
               </option>
             ))}
-          </select>
-          <ChevronDown size={13} />
-        </div>
-      </div>
-      <div className="inline-select">
-        <label>核心远程翻译模型</label>
-        <div className="select-wrap">
-          <select value={settings.coreModelId} onChange={(event) => onChange({ coreModelId: event.target.value })}>
-            {searchModels.map((item) => <option value={item.id} key={item.id}>{item.name} · {capabilityLabels[item.capability]}</option>)}
           </select>
           <ChevronDown size={13} />
         </div>
@@ -150,7 +141,7 @@ export function RemoteModelManager({ settings, onChange }: { settings: EntitySea
             ))}
         </div>
       )}
-      <small className="muted">多模态 + 搜索模型可同时用于术语查询和 OCR 视觉兜底；仅搜索模型不会接收截图；离线模型当前只保存配置，不参与自动路由。</small>
+      <small className="muted">多模态 + 搜索模型可同时用于术语查询和远程视觉识别；仅搜索模型不会接收截图；离线模型当前只保存配置，不参与自动路由。核心翻译模型请在“翻译与词库”中选择。</small>
     </div>
   )
 }
