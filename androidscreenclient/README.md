@@ -9,6 +9,7 @@
 - NSTrans 连接 TCP `38471` 完成握手；电视端为当前控制器生成临时会话令牌。
 - 文本模式传输字幕、原始画布尺寸、坐标、字体、透明度和滚动时长，由电视实时绘制。
 - 图片模式传输透明 PNG 字幕图层；NSTrans 在连接期间隐藏本机字幕层，电视端按屏幕尺寸缩放合成。
+- 在应用内观看系统 HDMI 输入时主动取得媒体音频焦点，并将遥控器音量键绑定到系统媒体音量；切换到其他 HDMI 应用时释放音频焦点。
 - 断开连接时会立即清空电视字幕。协议只在局域网中工作，不上传 OCR 原文或画面。
 
 ## 构建和安装
@@ -28,6 +29,8 @@ APK 路径：`app/build/outputs/apk/debug/app-debug.apk`。
 ## HDMI 限制
 
 Android 没有面向所有设备的通用 HDMI 输入 API。本客户端依赖厂商把 HDMI 注册到 TV Input Framework。若没有注册，可以进入厂商自带 HDMI 应用；只要已经授予悬浮窗权限，NSTrans 字幕服务仍可覆盖在其上层。
+
+应用不申请麦克风权限，也不会录制 HDMI 声音。HDMI 音频由厂商 TV Input Session 直接路由到系统媒体输出；如果画面正常但仍无声，请确认电视媒体音量未静音，并通过 `adb logcat -s HdmiOverlayTest` 检查 `HDMI audio focus request` 是否成功。
 
 检查输入：
 

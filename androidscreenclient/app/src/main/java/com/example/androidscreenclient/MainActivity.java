@@ -7,6 +7,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.media.AudioManager;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
@@ -42,6 +43,8 @@ public final class MainActivity extends Activity {
     private TestPatternView testPattern;
     private TextView overlay;
     private TextView status;
+    private AudioManager audioManager;
+    private boolean ownsAudioFocus;
     private final List<TvInputInfo> hdmiInputs = new ArrayList<>();
     private int selectedInput = -1;
 
@@ -50,6 +53,8 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         enterImmersiveMode();
         createUi();
         startService(new Intent(this, OverlayService.class));
@@ -69,7 +74,8 @@ public final class MainActivity extends Activity {
             @Override
             public void onVideoAvailable(String inputId) {
                 testPattern.setVisibility(View.GONE);
-                setStatus("HDMI 画面已连接  •  " + inputId, false);
+                requestHdmiAudioFocus();
+                setStatus("HDMI 画面已连接  •  声音" + (ownsAudioFocus ? "已启用" : "焦点获取失败") + "  •  " + inputId, false);
                 Log.i(TAG, "Video available: " + inputId);
             }
 
@@ -160,7 +166,42 @@ public final class MainActivity extends Activity {
         setStatus("正在连接 HDMI " + (selectedInput + 1) + "/" + hdmiInputs.size()
                 + "\n" + input.getId(), true);
         Log.i(TAG, "Tuning " + passthroughUri);
+        requestHdmiAudioFocus();
+        tvView.setStreamVolume(ownsAudioFocus ? 1.0f : 0.0f);
         tvView.tune(input.getId(), passthroughUri);
+    }
+
+    private final AudioManager.OnAudioFocusChangeListener audioFocusListener = new AudioManager.OnAudioFocusChangeListener() {
+        @Override
+        public void onAudioFocusChange(final int focusChange) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() {
+                    ownsAudioFocus = focusChange == AudioManager.AUDIOFOCUS_GAIN;
+                    if (tvView != null) tvView.setStreamVolume(ownsAudioFocus ? 1.0f : 0.0f);
+                    Log.i(TAG, "HDMI audio focus changed: " + focusChange + ", enabled=" + ownsAudioFocus);
+                }
+            });
+        }
+    };
+
+    @SuppressWarnings("deprecation")
+    private void requestHdmiAudioFocus() {
+        if (audioManager == null) return;
+        int result = audioManager.requestAudioFocus(
+                audioFocusListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN);
+        ownsAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        if (tvView != null) tvView.setStreamVolume(ownsAudioFocus ? 1.0f : 0.0f);
+        Log.i(TAG, "HDMI audio focus request: " + result + ", musicVolume="
+                + audioManager.getStreamVolume(AudioManager.STREAM_MUSIC));
+    }
+
+    @SuppressWarnings("deprecation")
+    private void abandonHdmiAudioFocus() {
+        if (audioManager != null && ownsAudioFocus) audioManager.abandonAudioFocus(audioFocusListener);
+        ownsAudioFocus = false;
+        if (tvView != null) tvView.setStreamVolume(0.0f);
     }
 
     private void selectNextInput() {
@@ -208,10 +249,18 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         enterImmersiveMode();
+        if (selectedInput >= 0) requestHdmiAudioFocus();
+    }
+
+    @Override
+    protected void onPause() {
+        abandonHdmiAudioFocus();
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
+        abandonHdmiAudioFocus();
         tvView.reset();
         super.onDestroy();
     }
