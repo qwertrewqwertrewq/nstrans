@@ -95,7 +95,10 @@ def merge_passes(primary, detail):
 
 for raw_line in sys.stdin:
     try:
-        request = json.loads(raw_line)
+        # PowerShell can prepend a UTF-8 BOM when piping the first request to a
+        # native executable. Rust does not, but accepting it makes the worker
+        # robust for diagnostics and direct command-line use as well.
+        request = json.loads(raw_line.lstrip("\ufeff"))
         image = cv2.imdecode(np.frombuffer(base64.b64decode(request["image"]), dtype=np.uint8), cv2.IMREAD_COLOR)
         results = engine.run_ocr(
             image,
