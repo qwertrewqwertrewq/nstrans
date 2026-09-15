@@ -163,12 +163,34 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-      - name: Install dependencies and native runtimes
+      - name: Install dependencies and MeikiOCR runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           npm ci --ignore-scripts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:WINDOWS_OLLAMA_VERSION -NoLlama
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build RemoteOnly installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          npm run windows:build:remote
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force artifacts/RemoteOnly | Out-Null
+          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop | Select-Object -First 1
+          if (-not $Source) { throw "RemoteOnly NSIS installer was not produced." }
+          Copy-Item $Source.FullName artifacts/RemoteOnly/NSTrans-Windows-x64-RemoteOnly-setup.exe
+      - name: Upload RemoteOnly installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: NSTrans-Windows-x64-RemoteOnly
+          path: artifacts/RemoteOnly/*
+          if-no-files-found: error
+      - name: Install Llama runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:WINDOWS_OLLAMA_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build WithLlama installer
@@ -181,23 +203,9 @@ jobs:
           $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop | Select-Object -First 1
           if (-not $Source) { throw "WithLlama NSIS installer was not produced." }
           Copy-Item $Source.FullName artifacts/WithLlama/NSTrans-Windows-x64-WithLlama-setup.exe
-      - name: Build RemoteOnly installer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          npm run windows:build:remote
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Force artifacts/RemoteOnly | Out-Null
-          $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop | Select-Object -First 1
-          if (-not $Source) { throw "RemoteOnly NSIS installer was not produced." }
-          Copy-Item $Source.FullName artifacts/RemoteOnly/NSTrans-Windows-x64-RemoteOnly-setup.exe
-      - uses: actions/upload-artifact@v4
+      - name: Upload WithLlama installer
+        uses: actions/upload-artifact@v4
         with:
           name: NSTrans-Windows-x64-WithLlama
           path: artifacts/WithLlama/*
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        with:
-          name: NSTrans-Windows-x64-RemoteOnly
-          path: artifacts/RemoteOnly/*
           if-no-files-found: error
