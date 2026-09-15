@@ -56,7 +56,9 @@ if ($Force -or -not (Test-Path $MeikiExe)) {
     }
     $DestinationSnapshot = Join-Path $DestinationRepo "snapshots\$Revision"
     New-Item -ItemType Directory -Force -Path (Join-Path $DestinationRepo "refs"), $DestinationSnapshot | Out-Null
-    Set-Content -Path (Join-Path $DestinationRepo "refs\main") -Value $Revision -Encoding ascii
+    # huggingface_hub reads refs/main verbatim (without Trim), so Set-Content's
+    # trailing newline would become part of the snapshot directory name.
+    [System.IO.File]::WriteAllText((Join-Path $DestinationRepo "refs\main"), $Revision, [System.Text.Encoding]::ASCII)
     Copy-Item $SourcePath (Join-Path $DestinationSnapshot $FileName) -Force
     $Materialized = Get-Item (Join-Path $DestinationSnapshot $FileName) -Force
     if ($Materialized.LinkType -or $Materialized.Length -lt 1000000) {
