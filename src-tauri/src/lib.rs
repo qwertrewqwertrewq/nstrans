@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{io::{BufRead, BufReader, Write}, process::{Child, ChildStdin, ChildStdout, Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
+use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
 
 mod tv_cast;
@@ -75,6 +75,11 @@ struct LlamaState;
 fn isolate_process(command: &mut Command) {
   #[cfg(unix)]
   { command.process_group(0); }
+  #[cfg(target_os = "windows")]
+  {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+  }
 }
 
 fn terminate_process(child: &mut Child) {
@@ -666,7 +671,7 @@ fn meiki_binary(app: &AppHandle) -> Result<std::path::PathBuf, String> {
   }
 }
 
-struct MeikiProcess { child: Child, input: ChildStdin, output: BufReader<ChildStdout> }
+struct MeikiProcess { child: Child, input: ChildStdin, output: BufReader<ChildStdout>, error: BufReader<ChildStderr> }
 #[derive(Clone)]
 struct MeikiState(Arc<Mutex<Option<MeikiProcess>>>);
 
@@ -684,12 +689,14 @@ fn ensure_meiki_process(app: &AppHandle, guard: &mut Option<MeikiProcess>) -> Re
     let mut command = Command::new(meiki_binary(app)?);
     command.env("PYTHONIOENCODING", "utf-8");
     command.env("PYTHONUTF8", "1");
-    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     isolate_process(&mut command);
-    let mut child = command.spawn().map_err(|error| format!("无法启动 MeikiOCR：{error}"))?;
+    let binary = meiki_binary(app)?;
+    let mut child = command.spawn().map_err(|error| format!("无法启动 MeikiOCR（{}）：{error}", binary.display()))?;
     let input = child.stdin.take().ok_or("无法连接 MeikiOCR 输入")?;
     let output = BufReader::new(child.stdout.take().ok_or("无法连接 MeikiOCR 输出")?);
-    *guard = Some(MeikiProcess { child, input, output });
+    let error = BufReader::new(child.stderr.take().ok_or("无法连接 MeikiOCR 错误输出")?);
+    *guard = Some(MeikiProcess { child, input, output, error });
   }
   Ok(())
 }
@@ -710,8 +717,18 @@ fn run_meiki_ocr(app: &AppHandle, shared: &Arc<Mutex<Option<MeikiProcess>>>, ima
   loop {
     line.clear();
     if process.output.read_line(&mut line).map_err(|error| format!("无法读取 MeikiOCR：{error}"))? == 0 {
+      let status = match process.child.try_wait().ok().flatten() {
+        Some(value) => value.to_string(),
+        None => {
+          let _ = process.child.kill();
+          process.child.wait().map(|value| value.to_string()).unwrap_or_else(|_| "未知退出状态".into())
+        }
+      };
+      let mut detail = String::new();
+      let _ = process.error.read_to_string(&mut detail);
+      let detail = detail.trim();
       *guard = None;
-      return Err("MeikiOCR 进程意外退出".into());
+      return Err(if detail.is_empty() { format!("MeikiOCR 进程意外退出（{status}）") } else { format!("MeikiOCR 进程意外退出（{status}）：{detail}") });
     }
     if let Some(result) = line.strip_prefix("YOMI_RESULT:") {
       return serde_json::from_str(result).map_err(|error| format!("无法解析 MeikiOCR 结果：{error}"));

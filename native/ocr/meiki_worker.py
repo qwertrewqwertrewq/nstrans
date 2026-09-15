@@ -24,6 +24,7 @@ import numpy as np
 from meikiocr import MeikiOCR
 
 engine = MeikiOCR()
+print("YOMI_READY:" + json.dumps({"provider": engine.active_provider}), flush=True)
 JAPANESE_CHARACTER = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 CONTROLLER_CHARACTER = set("ABXYLR")
 

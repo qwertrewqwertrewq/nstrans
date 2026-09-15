@@ -37,12 +37,14 @@ export async function recognizeJapanese(canvas: HTMLCanvasElement, language: str
     const seconds = Math.max(1, Math.round((performance.now() - meikiStartedAt) / 1_000))
     onProgress({ status: 'meikiocr-loading', progress: Math.min(.9, .05 + seconds / 75), detail: `已等待 ${seconds} 秒 · 首次加载模型可能需要 30–60 秒` })
   }, 1_000) : undefined
+  let meikiFailure: unknown
   const meiki = await recognizeWithMeiki(canvas, minimumConfidence).then((result) => {
     meikiReady = Boolean(result)
     return result
   }).catch((reason) => {
     meikiReady = false
-    writeDiagnosticLog('OCR', 'MeikiOCR 不可用，切换备选', messageOf(reason), 'warning', 10_000)
+    meikiFailure = reason
+    writeDiagnosticLog('OCR', platform === 'windows' ? 'MeikiOCR 运行失败' : 'MeikiOCR 不可用，切换备选', messageOf(reason), 'error', 10_000)
     return null
   }).finally(() => { if (loadingTimer) clearInterval(loadingTimer) })
   if (meiki) {
@@ -51,7 +53,7 @@ export async function recognizeJapanese(canvas: HTMLCanvasElement, language: str
     reportRecognition('MeikiOCR', regions, performance.now() - meikiStartedAt, coldStart)
     return regions
   }
-  if (platform === 'windows') throw new Error('MeikiOCR 无法使用，请重新安装 Windows OCR 运行时或查看运行日志')
+  if (platform === 'windows') throw new Error(`MeikiOCR 无法使用：${messageOf(meikiFailure ?? '未知错误')}。请复制运行日志中的完整错误信息`)
   const native = await recognizeWithAppleVision(canvas, minimumConfidence).catch((reason) => {
     writeDiagnosticLog('OCR', 'Apple Vision 不可用，切换备选', messageOf(reason), 'warning', 10_000)
     return null

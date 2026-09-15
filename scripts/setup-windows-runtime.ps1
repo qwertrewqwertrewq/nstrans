@@ -13,6 +13,7 @@ $Build = Join-Path $Root ".build\windows"
 $Venv = Join-Path $Build "venv"
 $Python = Join-Path $Venv "Scripts\python.exe"
 $MeikiExe = Join-Path $Runtime "nstrans-meiki-ocr.exe"
+$MeikiBundle = Join-Path $Build "meiki-bundle"
 $LlamaExe = Join-Path $Runtime "nstrans-llama.exe"
 $LlamaVersionFile = Join-Path $Runtime "ollama-version.txt"
 New-Item -ItemType Directory -Force -Path $Runtime, $Build | Out-Null
@@ -31,6 +32,44 @@ if ($Force -or -not (Test-Path $MeikiExe)) {
   $Recognize = Join-Path $Hub "models--rtr46--meiki.txt.recognition.v0"
   if (-not (Test-Path $Detect) -or -not (Test-Path $Recognize)) { throw "MeikiOCR model cache is incomplete." }
 
+  # Hugging Face snapshots normally contain symlinks to blobs. PyInstaller
+  # preserves those as links, but restoring them on a user's Windows machine
+  # can require Developer Mode or elevated privileges. Build a minimal cache
+  # whose snapshot entries are ordinary files so the installed OCR runtime is
+  # fully self-contained and works for standard users.
+  if (Test-Path $MeikiBundle) { Remove-Item -Recurse -Force $MeikiBundle }
+  $BundleHub = Join-Path $MeikiBundle "huggingface\hub"
+  function Copy-HuggingFaceSnapshotFile {
+    param([string]$SourceRepo, [string]$DestinationRepo, [string]$FileName)
+    $Revision = (Get-Content (Join-Path $SourceRepo "refs\main") -Raw).Trim()
+    if (-not $Revision) { throw "Hugging Face revision is missing for $SourceRepo." }
+    $SourcePath = Join-Path $SourceRepo "snapshots\$Revision\$FileName"
+    $SourceItem = Get-Item $SourcePath -Force
+    if ($SourceItem.LinkType) {
+      $LinkTarget = @($SourceItem.Target)[0]
+      $TargetPath = if ([System.IO.Path]::IsPathRooted($LinkTarget)) {
+        $LinkTarget
+      } else {
+        Join-Path $SourceItem.DirectoryName $LinkTarget
+      }
+      $SourcePath = (Resolve-Path $TargetPath).Path
+    }
+    $DestinationSnapshot = Join-Path $DestinationRepo "snapshots\$Revision"
+    New-Item -ItemType Directory -Force -Path (Join-Path $DestinationRepo "refs"), $DestinationSnapshot | Out-Null
+    Set-Content -Path (Join-Path $DestinationRepo "refs\main") -Value $Revision -Encoding ascii
+    Copy-Item $SourcePath (Join-Path $DestinationSnapshot $FileName) -Force
+    $Materialized = Get-Item (Join-Path $DestinationSnapshot $FileName) -Force
+    if ($Materialized.LinkType -or $Materialized.Length -lt 1000000) {
+      throw "MeikiOCR model was not materialized correctly: $FileName"
+    }
+  }
+
+  $BundleDetect = Join-Path $BundleHub "models--rtr46--meiki.text.detect.v0"
+  $BundleRecognize = Join-Path $BundleHub "models--rtr46--meiki.txt.recognition.v0"
+  Copy-HuggingFaceSnapshotFile $Detect $BundleDetect "meiki.text.detect.v0.1.960x544.onnx"
+  Copy-HuggingFaceSnapshotFile $Recognize $BundleRecognize "meiki.text.rec.v0.960x32.onnx"
+  Copy-HuggingFaceSnapshotFile $Recognize $BundleRecognize "meiki.text.rec.v0.vertical.32x480.onnx"
+
   & $Python -m PyInstaller --noconfirm --clean --onefile --console `
     --name "nstrans-meiki-ocr" `
     --distpath $Runtime `
@@ -39,10 +78,24 @@ if ($Force -or -not (Test-Path $MeikiExe)) {
     --exclude-module torch `
     --exclude-module torchvision `
     --exclude-module onnxruntime.quantization `
-    --add-data "${Detect};huggingface/hub/models--rtr46--meiki.text.detect.v0" `
-    --add-data "${Recognize};huggingface/hub/models--rtr46--meiki.txt.recognition.v0" `
+    --add-data "${BundleHub};huggingface/hub" `
     (Join-Path $Root "native\ocr\meiki_worker.py")
 }
+
+# Do not publish an installer merely because PyInstaller produced an EXE.
+# Start the frozen worker, load all bundled ONNX models offline, and process a
+# valid image. This catches missing DLLs, broken cache layout and link issues on
+# the same Windows runner that creates the release installer.
+$SmokeRequest = & $Python -c "import base64,cv2,json,numpy as np; ok,data=cv2.imencode('.jpg',np.zeros((360,640,3),dtype=np.uint8)); print(json.dumps({'image':base64.b64encode(data).decode(),'det_threshold':0.45,'rec_threshold':0.15}))"
+$SmokeOutput = @($SmokeRequest | & $MeikiExe 2>&1)
+if ($LASTEXITCODE -ne 0) { throw "MeikiOCR frozen runtime exited with code $LASTEXITCODE`: $($SmokeOutput -join ' | ')" }
+if (-not ($SmokeOutput | Where-Object { $_ -like "YOMI_READY:*" })) { throw "MeikiOCR frozen runtime did not report ready: $($SmokeOutput -join ' | ')" }
+$SmokeResultLine = $SmokeOutput | Where-Object { $_ -like "YOMI_RESULT:*" } | Select-Object -Last 1
+if (-not $SmokeResultLine) { throw "MeikiOCR frozen runtime returned no OCR result: $($SmokeOutput -join ' | ')" }
+$SmokeResultPrefix = "YOMI_RESULT:"
+$SmokeResult = ($SmokeResultLine.Substring($SmokeResultPrefix.Length) | ConvertFrom-Json)
+if ($SmokeResult.error) { throw "MeikiOCR frozen runtime smoke test failed: $($SmokeResult.error)" }
+Write-Host "MeikiOCR frozen runtime smoke test passed."
 
 $OllamaLib = Join-Path $Runtime "lib\ollama"
 $InstalledLlamaVersion = if (Test-Path $LlamaVersionFile) { (Get-Content $LlamaVersionFile -Raw).Trim() } else { "" }
