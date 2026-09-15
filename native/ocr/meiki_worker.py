@@ -16,8 +16,13 @@ if hasattr(sys.stderr, "reconfigure"):
 # Force Hugging Face into offline mode so OCR never depends on Python, a daemon,
 # or a network request after NSTrans has been installed.
 if getattr(sys, "frozen", False):
-    os.environ.setdefault("HF_HOME", os.path.join(sys._MEIPASS, "huggingface"))
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    # Override inherited build-machine values as well as user values. The
+    # frozen executable must always use its own materialized model cache and
+    # must never attempt a network download at application startup.
+    bundled_hf_home = os.path.join(sys._MEIPASS, "huggingface")
+    os.environ["HF_HOME"] = bundled_hf_home
+    os.environ["HF_HUB_CACHE"] = os.path.join(bundled_hf_home, "hub")
+    os.environ["HF_HUB_OFFLINE"] = "1"
 
 import cv2
 import numpy as np

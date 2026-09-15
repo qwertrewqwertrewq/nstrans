@@ -87,7 +87,16 @@ if ($Force -or -not (Test-Path $MeikiExe)) {
 # valid image. This catches missing DLLs, broken cache layout and link issues on
 # the same Windows runner that creates the release installer.
 $SmokeRequest = & $Python -c "import base64,cv2,json,numpy as np; ok,data=cv2.imencode('.jpg',np.zeros((360,640,3),dtype=np.uint8)); print(json.dumps({'image':base64.b64encode(data).decode(),'det_threshold':0.45,'rec_threshold':0.15}))"
-$SmokeOutput = @($SmokeRequest | & $MeikiExe 2>&1)
+$PreviousErrorActionPreference = $ErrorActionPreference
+try {
+  # Native stderr is part of the diagnostic payload below; PowerShell must not
+  # turn a single warning line into a terminating script error before the
+  # worker's exit code and protocol response can be checked.
+  $ErrorActionPreference = "Continue"
+  $SmokeOutput = @($SmokeRequest | & $MeikiExe 2>&1)
+} finally {
+  $ErrorActionPreference = $PreviousErrorActionPreference
+}
 if ($LASTEXITCODE -ne 0) { throw "MeikiOCR frozen runtime exited with code $LASTEXITCODE`: $($SmokeOutput -join ' | ')" }
 if (-not ($SmokeOutput | Where-Object { $_ -like "YOMI_READY:*" })) { throw "MeikiOCR frozen runtime did not report ready: $($SmokeOutput -join ' | ')" }
 $SmokeResultLine = $SmokeOutput | Where-Object { $_ -like "YOMI_RESULT:*" } | Select-Object -Last 1
