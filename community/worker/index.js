@@ -1,5 +1,19 @@
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' }
 const encoder = new TextEncoder()
+const githubRepository = 'qwertrewqwertrewq/nstrans'
+const githubReleasesUrl = `https://api.github.com/repos/${githubRepository}/releases?per_page=30`
+const githubReleasePage = `https://github.com/${githubRepository}/releases`
+const downloadAssets = Object.freeze({
+  'macos-with-llama': { prefix: 'NSTrans-', suffix: '-macOS-arm64-WithLlama.dmg' },
+  'macos-remote-only': { prefix: 'NSTrans-', suffix: '-macOS-arm64-RemoteOnly.dmg' },
+  'windows-with-llama': { prefix: 'NSTrans-', suffix: '-Windows-x64-WithLlama-setup.exe' },
+  'windows-remote-only': { prefix: 'NSTrans-', suffix: '-Windows-x64-RemoteOnly-setup.exe' },
+  'ipados-with-llama': { prefix: 'NSTrans-', suffix: '-iPadOS-arm64-unsigned-WithLlama.ipa' },
+  'ipados-remote-only': { prefix: 'NSTrans-', suffix: '-iPadOS-arm64-unsigned-RemoteOnly.ipa' },
+  'android-with-llama': { prefix: 'NSTrans-', suffix: '-Android-arm64-debug-WithLlama.apk' },
+  'android-remote-only': { prefix: 'NSTrans-', suffix: '-Android-arm64-debug-RemoteOnly.apk' },
+  tv: { prefix: 'NSTrans-TV-', suffix: '-Android-debug.apk' },
+})
 
 export default {
   async fetch(request, env) {
@@ -35,8 +49,45 @@ async function route(request, env) {
   if (/^\/api\/v1\/translations\/\d+$/u.test(path) && request.method === 'PATCH') return apiEditTranslation(request, env, Number(path.split('/')[4]))
   if (/^\/api\/v1\/dictionaries\/[^/]+$/u.test(path) && request.method === 'GET') return dictionary(env, decodeURIComponent(path.split('/')[4]))
   if (path === '/api/v1/contributions' && request.method === 'POST') return uploadContributions(request, env)
+  if (path.startsWith('/download/file/')) return downloadFile(request, path.slice('/download/file/'.length))
   if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
+}
+
+async function downloadFile(request, key) {
+  if (!['GET', 'HEAD'].includes(request.method)) return json({ error: '下载入口仅支持 GET 或 HEAD' }, 405)
+  const rule = downloadAssets[key]
+  if (!rule) return json({ error: '未知下载类型' }, 404)
+  try {
+    const releases = await githubReleases(request)
+    for (const release of releases) {
+      if (release?.draft || !Array.isArray(release?.assets)) continue
+      const matches = release.assets
+        .filter((asset) => asset?.state === 'uploaded' && asset.name?.startsWith(rule.prefix) && asset.name.endsWith(rule.suffix))
+        .sort((left, right) => String(right.updated_at || '').localeCompare(String(left.updated_at || '')))
+      if (!matches.length) continue
+      const target = new URL(matches[0].browser_download_url)
+      if (target.protocol !== 'https:' || target.hostname !== 'github.com' || !target.pathname.startsWith(`/${githubRepository}/releases/download/`)) throw new Error('GitHub 返回了无效下载地址')
+      return new Response(null, { status: 302, headers: { location: target.toString(), 'cache-control': 'public, max-age=300' } })
+    }
+    console.warn(`No GitHub release asset found for ${key}`)
+  } catch (error) {
+    console.error(`Unable to resolve GitHub release asset for ${key}`, error)
+  }
+  return new Response(null, { status: 302, headers: { location: githubReleasePage, 'cache-control': 'no-store' } })
+}
+
+async function githubReleases(request) {
+  const cache = caches.default
+  const cacheKey = new Request(new URL('/__nstrans_cache/github_releases', request.url), { method: 'GET' })
+  const cached = await cache.match(cacheKey)
+  if (cached) return cached.json()
+  const response = await fetch(githubReleasesUrl, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'NSTrans Community', 'x-github-api-version': '2022-11-28' } })
+  if (!response.ok) throw new Error(`GitHub Releases API ${response.status}`)
+  const releases = await response.json()
+  const cachedResponse = new Response(JSON.stringify(releases), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=600' } })
+  await cache.put(cacheKey, cachedResponse)
+  return releases
 }
 
 async function startGithubAuth(env) {
