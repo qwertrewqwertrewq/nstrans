@@ -147,6 +147,17 @@ fn status(connection: Option<&TvConnection>) -> TvConnectionStatus {
   }
 }
 
+fn validate_receiver_capabilities(response: &Value) -> Result<(), String> {
+  if response.get("protocol").and_then(Value::as_str) != Some("nstrans-tv-v1") {
+    return Err("目标不是兼容的 NSTrans 电视客户端".into());
+  }
+  let supports_in_app_subtitles = response.get("inAppSubtitles").and_then(Value::as_bool) == Some(true);
+  if !supports_in_app_subtitles && response.get("overlayPermission").and_then(Value::as_bool) == Some(false) {
+    return Err("旧版电视客户端尚未获得悬浮窗权限；请授权或升级电视客户端".into());
+  }
+  Ok(())
+}
+
 #[tauri::command]
 pub fn tv_cast_devices(state: tauri::State<'_, TvCastState>) -> Vec<TvDevice> {
   let cutoff = now_ms().saturating_sub(DEVICE_TTL_MS);
@@ -159,8 +170,7 @@ pub fn tv_cast_devices(state: tauri::State<'_, TvCastState>) -> Vec<TvDevice> {
 pub fn tv_cast_connect(state: tauri::State<'_, TvCastState>, address: String) -> Result<TvConnectionStatus, String> {
   let (endpoint, socket) = resolve_receiver(&address)?;
   let response = http_json(socket, "/handshake", &json!({ "protocol": "nstrans-tv-v1", "controller": "NSTrans" }))?;
-  if response.get("protocol").and_then(Value::as_str) != Some("nstrans-tv-v1") { return Err("目标不是兼容的 NSTrans 电视客户端".into()); }
-  if response.get("overlayPermission").and_then(Value::as_bool) == Some(false) { return Err("电视客户端尚未获得悬浮窗权限".into()); }
+  validate_receiver_capabilities(&response)?;
   let token = response.get("token").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| "电视客户端未返回握手令牌".to_string())?.to_string();
   let connection = TvConnection {
     name: response.get("name").and_then(Value::as_str).unwrap_or("Android TV").to_string(),
@@ -211,5 +221,24 @@ mod tests {
     let (endpoint, socket) = resolve_receiver("http://127.0.0.1:4000/receiver").unwrap();
     assert_eq!(endpoint, "127.0.0.1:4000");
     assert_eq!(socket.port(), 4000);
+  }
+
+  #[test]
+  fn accepts_new_receiver_without_overlay_permission() {
+    let response = json!({
+      "protocol": "nstrans-tv-v1",
+      "inAppSubtitles": true,
+      "overlayPermission": false,
+    });
+    assert!(validate_receiver_capabilities(&response).is_ok());
+  }
+
+  #[test]
+  fn rejects_legacy_receiver_without_overlay_permission() {
+    let response = json!({
+      "protocol": "nstrans-tv-v1",
+      "overlayPermission": false,
+    });
+    assert!(validate_receiver_capabilities(&response).is_err());
   }
 }

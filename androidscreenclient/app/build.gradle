@@ -10,7 +10,13 @@ android {
         applicationId "com.example.androidscreenclient"
         minSdk 23
         targetSdk 23
-        versionCode 3
-        versionName "0.2.1"
+        versionCode 4
+        versionName "0.2.2"
+    }
+
+    lint {
+        // This APK intentionally targets legacy Android TV firmware while
+        // remaining installable on Android 6. It is distributed outside Play.
+        disable "ExpiredTargetSdkVersion", "MissingTvBanner"
     }
 }

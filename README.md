@@ -108,13 +108,12 @@ npm run android:build:remote
 
 ## Android TV / 投影仪字幕客户端
 
-[`androidscreenclient`](./androidscreenclient) 是独立的 Android 6+ 电视接收端，不负责 OCR 和翻译。它可显示系统 TV Input Framework 提供的 HDMI 输入，并以系统悬浮层接收 NSTrans 的实时字幕；即使切换到厂商自带 HDMI 应用，后台接收服务仍可继续覆盖字幕。
+[`androidscreenclient`](./androidscreenclient) 是独立的 Android 6+ 电视接收端，不负责 OCR 和翻译。默认字幕只在应用内显示，不要求悬浮窗权限；用户主动启用并完成系统授权后，才会启动前台接收服务和系统悬浮层，切换到厂商自带 HDMI 应用也能继续显示字幕。
 
 ```bash
 cd androidscreenclient
 ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell appops set com.example.androidscreenclient SYSTEM_ALERT_WINDOW allow
 ```
 
 电视端使用 UDP `38472` 自动广播，字幕服务监听 TCP `38471`。自动发现被路由器的 AP 隔离阻止时，可在 NSTrans 的“输入源与实时控制”卡片直接填写电视 IP。文本模式保留电视端滚动能力；图片模式更接近本机布局，并会在传输期间隐藏本机字幕层。详细协议及设备限制见 [`androidscreenclient/README.md`](./androidscreenclient/README.md)。

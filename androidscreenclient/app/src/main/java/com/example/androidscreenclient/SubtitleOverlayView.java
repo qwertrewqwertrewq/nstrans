@@ -29,6 +29,7 @@ final class SubtitleOverlayView extends View {
     private float opacity = 0.92f;
     private float fontScale = 1f;
     private long receivedAt;
+    private boolean presentationEnabled = true;
 
     SubtitleOverlayView(Context context) {
         super(context);
@@ -63,15 +64,24 @@ final class SubtitleOverlayView extends View {
             }
         }
         receivedAt = System.currentTimeMillis();
-        setVisibility(bitmap == null && regions.isEmpty() ? INVISIBLE : VISIBLE);
+        updateVisibility();
         invalidate();
     }
 
     void clearOverlay() {
         regions.clear();
         clearBitmap();
-        setVisibility(INVISIBLE);
+        updateVisibility();
         invalidate();
+    }
+
+    void setPresentationEnabled(boolean enabled) {
+        presentationEnabled = enabled;
+        updateVisibility();
+    }
+
+    private void updateVisibility() {
+        setVisibility(presentationEnabled && (bitmap != null || !regions.isEmpty()) ? VISIBLE : INVISIBLE);
     }
 
     private void clearBitmap() {

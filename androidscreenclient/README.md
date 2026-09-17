@@ -1,6 +1,6 @@
 # NSTrans TV 客户端
 
-面向 Android 6 及以上电视、投影仪的 HDMI 悬浮字幕接收端。应用通过厂商提供的 TV Input Framework 显示 HDMI；切换到厂商自带 HDMI 应用后，后台 `OverlayService` 仍会在最上层显示 NSTrans 发来的翻译。
+面向 Android 6 及以上电视、投影仪的 HDMI 字幕接收端。默认仅在 NSTrans TV 应用内显示字幕，不需要悬浮窗权限；用户可在应用右下角主动选择“尝试启用 App 外字幕”，完成系统授权后，切换到厂商自带 HDMI 应用也能继续显示字幕。授权失败或关闭 App 外模式时会自动回到 App 内字幕。
 
 ## 局域网工作方式
 
@@ -9,6 +9,7 @@
 - NSTrans 连接 TCP `38471` 完成握手；电视端为当前控制器生成临时会话令牌。
 - 文本模式传输字幕、原始画布尺寸、坐标、字体、透明度和滚动时长，由电视实时绘制。
 - 图片模式传输透明 PNG 字幕图层；NSTrans 在连接期间隐藏本机字幕层，电视端按屏幕尺寸缩放合成。
+- 默认模式为仅 App 内字幕；悬浮窗权限不会在启动时自动申请，必须由用户在界面主动启用。已授权后也可随时切回仅 App 内模式，无需撤销系统权限。
 - 在应用内观看系统 HDMI 输入时主动取得媒体音频焦点，并将遥控器音量键绑定到系统媒体音量；切换到其他 HDMI 应用时释放音频焦点。
 - 断开连接时会立即清空电视字幕。协议只在局域网中工作，不上传 OCR 原文或画面。
 
@@ -17,10 +18,11 @@
 ```bash
 ./gradlew assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell appops set com.example.androidscreenclient SYSTEM_ALERT_WINDOW allow
 adb shell am start -n com.example.androidscreenclient/.MainActivity
 adb logcat -s NSTransTvClient HdmiOverlayTest
 ```
+
+安装后无需通过 ADB 授予悬浮窗权限。字幕默认仅在应用内显示；如需覆盖厂商 HDMI 或其他应用，请在 NSTrans TV 右下角选择“尝试启用 App 外字幕”，再按系统提示授权。
 
 APK 路径：`app/build/outputs/apk/debug/app-debug.apk`。
 

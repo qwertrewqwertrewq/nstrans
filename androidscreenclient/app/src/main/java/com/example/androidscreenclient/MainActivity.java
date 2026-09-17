@@ -2,6 +2,8 @@ package com.example.androidscreenclient;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
 import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -23,7 +25,10 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.Button;
 import android.widget.TextView;
+
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,8 +46,11 @@ public final class MainActivity extends Activity {
     private FrameLayout root;
     private TvView tvView;
     private TestPatternView testPattern;
-    private TextView overlay;
+    private SubtitleOverlayView subtitleView;
     private TextView status;
+    private Button overlayModeButton;
+    private boolean subtitleReceiverRegistered;
+    private boolean overlayPermissionRequestPending;
     private AudioManager audioManager;
     private boolean ownsAudioFocus;
     private final List<TvInputInfo> hdmiInputs = new ArrayList<>();
@@ -102,23 +110,8 @@ public final class MainActivity extends Activity {
         });
         root.addView(tvView, matchParent());
 
-        overlay = new TextView(this);
-        overlay.setText("NSTrans TV · 等待局域网字幕");
-        overlay.setTextColor(Color.WHITE);
-        overlay.setTextSize(28);
-        overlay.setGravity(Gravity.CENTER);
-        overlay.setShadowLayer(5f, 2f, 2f, Color.BLACK);
-        overlay.setBackgroundColor(0x88000000);
-        FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(64));
-        overlayParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        overlayParams.topMargin = dp(36);
-        overlay.setPadding(dp(28), 0, dp(28), 0);
-        // Without overlay permission this remains the in-Activity fallback. Once
-        // permission is granted, OverlayService owns the single persistent label.
-        if (!Settings.canDrawOverlays(this)) {
-            root.addView(overlay, overlayParams);
-        }
+        subtitleView = new SubtitleOverlayView(this);
+        root.addView(subtitleView, matchParent());
 
         status = new TextView(this);
         status.setTextColor(Color.WHITE);
@@ -132,7 +125,88 @@ public final class MainActivity extends Activity {
         statusParams.bottomMargin = dp(18);
         root.addView(status, statusParams);
 
+        overlayModeButton = new Button(this);
+        overlayModeButton.setTextSize(15);
+        overlayModeButton.setFocusable(true);
+        overlayModeButton.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View view) { toggleExternalOverlay(); }
+        });
+        FrameLayout.LayoutParams buttonParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        buttonParams.gravity = Gravity.BOTTOM | Gravity.RIGHT;
+        buttonParams.rightMargin = dp(20);
+        buttonParams.bottomMargin = dp(18);
+        root.addView(overlayModeButton, buttonParams);
+
         setContentView(root);
+        updateOverlayModeUi();
+    }
+
+    private final BroadcastReceiver subtitleReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (OverlayService.ACTION_SUBTITLE_CLEAR.equals(intent.getAction())) {
+                subtitleView.clearOverlay();
+                return;
+            }
+            if (!OverlayService.ACTION_SUBTITLE_UPDATE.equals(intent.getAction())) return;
+            String payload = intent.getStringExtra(OverlayService.EXTRA_PAYLOAD);
+            if (payload == null) return;
+            try {
+                subtitleView.applyPayload(new JSONObject(payload));
+            } catch (Exception error) {
+                Log.w(TAG, "Invalid in-app subtitle payload", error);
+            }
+        }
+    };
+
+    private boolean externalOverlayEnabled() {
+        return externalOverlayRequested() && Settings.canDrawOverlays(this);
+    }
+
+    private boolean externalOverlayRequested() {
+        return getSharedPreferences(OverlayService.PREFERENCES, Context.MODE_PRIVATE)
+                .getBoolean(OverlayService.PREFERENCE_EXTERNAL_OVERLAY, false);
+    }
+
+    private void updateOverlayModeUi() {
+        boolean external = externalOverlayEnabled();
+        subtitleView.setPresentationEnabled(!external);
+        overlayModeButton.setText(external ? "切换为仅 App 内字幕" : "尝试启用 App 外字幕");
+        overlayModeButton.setContentDescription(external ? "关闭 App 外悬浮字幕" : "申请悬浮窗权限并启用 App 外字幕");
+    }
+
+    private void toggleExternalOverlay() {
+        if (externalOverlayEnabled()) {
+            getSharedPreferences(OverlayService.PREFERENCES, Context.MODE_PRIVATE).edit()
+                    .putBoolean(OverlayService.PREFERENCE_EXTERNAL_OVERLAY, false).apply();
+            startService(new Intent(this, OverlayService.class).setAction(OverlayService.ACTION_DISABLE_EXTERNAL));
+            updateOverlayModeUi();
+            setStatus("已切换为仅 App 内字幕；系统悬浮窗授权仍保留，可随时重新启用", false);
+            return;
+        }
+        if (Settings.canDrawOverlays(this)) {
+            enableExternalOverlay();
+            return;
+        }
+        overlayPermissionRequestPending = true;
+        try {
+            Intent permission = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(permission);
+            setStatus("请在系统页面允许 NSTrans TV 显示在其他应用上；返回后会自动启用", true);
+        } catch (RuntimeException error) {
+            overlayPermissionRequestPending = false;
+            setStatus("此设备无法打开悬浮窗授权页面；字幕继续仅在 App 内显示", true);
+            Log.w(TAG, "Overlay permission settings are unavailable", error);
+        }
+    }
+
+    private void enableExternalOverlay() {
+        getSharedPreferences(OverlayService.PREFERENCES, Context.MODE_PRIVATE).edit()
+                .putBoolean(OverlayService.PREFERENCE_EXTERNAL_OVERLAY, true).apply();
+        startService(new Intent(this, OverlayService.class).setAction(OverlayService.ACTION_ENABLE_EXTERNAL));
+        updateOverlayModeUi();
+        setStatus("App 外字幕已启用；现在可以切换到其他 HDMI 应用", false);
     }
 
     private void discoverAndTune() {
@@ -215,7 +289,7 @@ public final class MainActivity extends Activity {
     }
 
     private void setStatus(String message, boolean persistent) {
-        status.setText(message + "\n字幕接收端口：38471  •  确定键：切换输入  •  菜单键：显示/隐藏提示");
+        status.setText(message + "\n字幕接收端口：38471  •  确定键：切换输入  •  菜单键：显示/隐藏设置");
         status.setVisibility(View.VISIBLE);
         status.removeCallbacks(hideStatus);
         if (!persistent) {
@@ -237,8 +311,8 @@ public final class MainActivity extends Activity {
             return true;
         }
         if (keyCode == KeyEvent.KEYCODE_MENU) {
-            int next = overlay.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE;
-            overlay.setVisibility(next);
+            int next = overlayModeButton.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE;
+            overlayModeButton.setVisibility(next);
             status.setVisibility(next);
             return true;
         }
@@ -249,7 +323,42 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         enterImmersiveMode();
+        if (overlayPermissionRequestPending) {
+            overlayPermissionRequestPending = false;
+            if (Settings.canDrawOverlays(this)) enableExternalOverlay();
+            else setStatus("未授予悬浮窗权限；字幕继续仅在 App 内显示", false);
+        } else if (!Settings.canDrawOverlays(this) && externalOverlayRequested()) {
+            getSharedPreferences(OverlayService.PREFERENCES, Context.MODE_PRIVATE).edit()
+                    .putBoolean(OverlayService.PREFERENCE_EXTERNAL_OVERLAY, false).apply();
+            startService(new Intent(this, OverlayService.class).setAction(OverlayService.ACTION_DISABLE_EXTERNAL));
+        }
+        updateOverlayModeUi();
         if (selectedInput >= 0) requestHdmiAudioFocus();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(OverlayService.ACTION_SUBTITLE_UPDATE);
+        filter.addAction(OverlayService.ACTION_SUBTITLE_CLEAR);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(subtitleReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(subtitleReceiver, filter);
+        }
+        subtitleReceiverRegistered = true;
+        startService(new Intent(this, OverlayService.class).setAction(OverlayService.ACTION_SYNC_SUBTITLE));
+    }
+
+    @Override
+    protected void onStop() {
+        if (subtitleReceiverRegistered) {
+            unregisterReceiver(subtitleReceiver);
+            subtitleReceiverRegistered = false;
+        }
+        if (!externalOverlayRequested()) stopService(new Intent(this, OverlayService.class));
+        super.onStop();
     }
 
     @Override
