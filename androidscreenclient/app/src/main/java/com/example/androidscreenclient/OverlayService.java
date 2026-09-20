@@ -252,7 +252,12 @@ public final class OverlayService extends Service {
                 response.put("name", Build.MANUFACTURER + " " + Build.MODEL);
                 response.put("token", sessionToken);
                 response.put("inAppSubtitles", true);
-                response.put("overlayPermission", Settings.canDrawOverlays(this));
+                // Legacy NSTrans senders only inspect overlayPermission and reject the receiver
+                // when it is false. Since this TV client can always render subtitles in its own
+                // Activity, expose the aggregate display capability through the legacy field.
+                // Keep the actual Android system-overlay permission in a separate field.
+                response.put("overlayPermission", true);
+                response.put("systemOverlayPermission", Settings.canDrawOverlays(this));
                 response.put("externalOverlayEnabled", externalOverlayEnabled());
                 respond(socket, 200, response);
                 Log.i(TAG, "NSTrans controller paired");
