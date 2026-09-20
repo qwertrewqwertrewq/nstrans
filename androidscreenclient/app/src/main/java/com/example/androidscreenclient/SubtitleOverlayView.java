@@ -10,6 +10,7 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.util.Base64;
+import android.util.Log;
 import android.view.View;
 
 import org.json.JSONArray;
@@ -20,6 +21,7 @@ import java.util.List;
 
 /** Draws either a transparent PNG layer or normalized text regions. */
 final class SubtitleOverlayView extends View {
+    private static final String TAG = "NSTransTvClient";
     private final Paint background = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private final List<Region> regions = new ArrayList<>();
@@ -55,7 +57,12 @@ final class SubtitleOverlayView extends View {
             try {
                 byte[] bytes = Base64.decode(encoded, Base64.DEFAULT);
                 bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-            } catch (RuntimeException ignored) { bitmap = null; }
+                if (bitmap == null) Log.w(TAG, "Unable to decode image subtitle payload: " + bytes.length + " bytes");
+                else Log.i(TAG, "Image subtitle decoded: " + bitmap.getWidth() + "x" + bitmap.getHeight() + ", " + bytes.length + " bytes");
+            } catch (RuntimeException error) {
+                bitmap = null;
+                Log.w(TAG, "Invalid image subtitle payload", error);
+            }
         } else {
             JSONArray values = payload.optJSONArray("regions");
             if (values != null) for (int index = 0; index < values.length(); index++) {

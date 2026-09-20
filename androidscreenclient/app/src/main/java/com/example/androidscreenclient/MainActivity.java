@@ -13,6 +13,7 @@ import android.media.AudioManager;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
+import android.media.tv.TvTrackInfo;
 import android.media.tv.TvView;
 import android.net.Uri;
 import android.os.Bundle;
@@ -53,6 +54,8 @@ public final class MainActivity extends Activity {
     private boolean overlayPermissionRequestPending;
     private AudioManager audioManager;
     private boolean ownsAudioFocus;
+    private boolean tvSessionActive;
+    private boolean systemHdmiLaunchScheduled;
     private final List<TvInputInfo> hdmiInputs = new ArrayList<>();
     private int selectedInput = -1;
 
@@ -82,9 +85,35 @@ public final class MainActivity extends Activity {
             @Override
             public void onVideoAvailable(String inputId) {
                 testPattern.setVisibility(View.GONE);
-                requestHdmiAudioFocus();
+                ensureHdmiAudio();
+                tvView.removeCallbacks(retryHdmiAudio);
+                tvView.postDelayed(retryHdmiAudio, 750L);
                 setStatus("HDMI 画面已连接  •  声音" + (ownsAudioFocus ? "已启用" : "焦点获取失败") + "  •  " + inputId, false);
                 Log.i(TAG, "Video available: " + inputId);
+            }
+
+            @Override
+            public void onTracksChanged(String inputId, List<TvTrackInfo> tracks) {
+                String selectedAudio = tvView.getSelectedTrack(TvTrackInfo.TYPE_AUDIO);
+                int audioTracks = 0;
+                for (TvTrackInfo track : tracks) {
+                    if (track.getType() != TvTrackInfo.TYPE_AUDIO) continue;
+                    audioTracks++;
+                    if (selectedAudio == null) {
+                        tvView.selectTrack(TvTrackInfo.TYPE_AUDIO, track.getId());
+                        selectedAudio = track.getId();
+                    }
+                }
+                ensureHdmiAudio();
+                Log.i(TAG, "HDMI audio tracks=" + audioTracks + ", selected=" + selectedAudio);
+            }
+
+            @Override
+            public void onTrackSelected(String inputId, int type, String trackId) {
+                if (type == TvTrackInfo.TYPE_AUDIO) {
+                    ensureHdmiAudio();
+                    Log.i(TAG, "HDMI audio track selected: " + trackId);
+                }
             }
 
             @Override
@@ -171,7 +200,7 @@ public final class MainActivity extends Activity {
     private void updateOverlayModeUi() {
         boolean external = externalOverlayEnabled();
         subtitleView.setPresentationEnabled(!external);
-        overlayModeButton.setText(external ? "切换为仅 App 内字幕" : "尝试启用 App 外字幕");
+        overlayModeButton.setText(external ? "切换为仅 App 内字幕" : "启用 App 外字幕并打开系统 HDMI");
         overlayModeButton.setContentDescription(external ? "关闭 App 外悬浮字幕" : "申请悬浮窗权限并启用 App 外字幕");
     }
 
@@ -181,6 +210,8 @@ public final class MainActivity extends Activity {
                     .putBoolean(OverlayService.PREFERENCE_EXTERNAL_OVERLAY, false).apply();
             startService(new Intent(this, OverlayService.class).setAction(OverlayService.ACTION_DISABLE_EXTERNAL));
             updateOverlayModeUi();
+            if (selectedInput >= 0 && selectedInput < hdmiInputs.size()) tuneSelectedInput();
+            else discoverAndTune();
             setStatus("已切换为仅 App 内字幕；系统悬浮窗授权仍保留，可随时重新启用", false);
             return;
         }
@@ -206,7 +237,37 @@ public final class MainActivity extends Activity {
                 .putBoolean(OverlayService.PREFERENCE_EXTERNAL_OVERLAY, true).apply();
         startService(new Intent(this, OverlayService.class).setAction(OverlayService.ACTION_ENABLE_EXTERNAL));
         updateOverlayModeUi();
-        setStatus("App 外字幕已启用；现在可以切换到其他 HDMI 应用", false);
+        setStatus("App 外字幕已启用；正在尝试打开系统 HDMI，以使用厂商音频路由", false);
+        scheduleSystemHdmiPlayer();
+    }
+
+    /**
+     * Some Android TV firmwares only route HDMI audio from their privileged player. Xiaomi's
+     * Amlogic firmware exposes that player through a guarded intent; use it only when installed.
+     */
+    private boolean openSystemHdmiPlayer() {
+        Intent intent = new Intent("com.xiaomi.mitv.tvplayer.PLAY")
+                .setClassName("com.xiaomi.mitv.tvplayer", "com.xiaomi.mitv.tvplayer.ExternalSourceActivity")
+                .putExtra("input", xiaomiHdmiSource())
+                .putExtra("no_launch_panel", true);
+        if (intent.resolveActivity(getPackageManager()) == null) return false;
+        try {
+            releaseHdmiSession();
+            startActivity(intent);
+            Log.i(TAG, "Opened privileged system HDMI player for audio routing");
+            return true;
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Unable to open the system HDMI player", error);
+            return false;
+        }
+    }
+
+    private int xiaomiHdmiSource() {
+        if (selectedInput < 0 || selectedInput >= hdmiInputs.size()) return 23;
+        String id = hdmiInputs.get(selectedInput).getId();
+        if (id.contains("Hdmi3")) return 25;
+        if (id.contains("Hdmi2")) return 24;
+        return 23;
     }
 
     private void discoverAndTune() {
@@ -230,7 +291,25 @@ public final class MainActivity extends Activity {
             return;
         }
         selectedInput = 0;
-        tuneSelectedInput();
+        if (externalOverlayEnabled()) {
+            setStatus("App 外字幕模式已启用；可打开系统 HDMI 使用厂商音频路由", false);
+            scheduleSystemHdmiPlayer();
+        } else {
+            tuneSelectedInput();
+        }
+    }
+
+    private void scheduleSystemHdmiPlayer() {
+        if (systemHdmiLaunchScheduled) return;
+        systemHdmiLaunchScheduled = true;
+        root.postDelayed(new Runnable() {
+            @Override public void run() {
+                systemHdmiLaunchScheduled = false;
+                if (externalOverlayEnabled() && !openSystemHdmiPlayer()) {
+                    setStatus("未找到可直接启动的系统 HDMI 播放器；请手动切换到电视自带 HDMI 应用", false);
+                }
+            }
+        }, 350L);
     }
 
     private void tuneSelectedInput() {
@@ -243,6 +322,16 @@ public final class MainActivity extends Activity {
         requestHdmiAudioFocus();
         tvView.setStreamVolume(ownsAudioFocus ? 1.0f : 0.0f);
         tvView.tune(input.getId(), passthroughUri);
+        tvSessionActive = true;
+    }
+
+    private void releaseHdmiSession() {
+        if (tvView != null) {
+            tvView.removeCallbacks(retryHdmiAudio);
+            if (tvSessionActive) tvView.reset();
+        }
+        tvSessionActive = false;
+        abandonHdmiAudioFocus();
     }
 
     private final AudioManager.OnAudioFocusChangeListener audioFocusListener = new AudioManager.OnAudioFocusChangeListener() {
@@ -284,25 +373,40 @@ public final class MainActivity extends Activity {
             return;
         }
         selectedInput = (selectedInput + 1) % hdmiInputs.size();
-        tvView.reset();
+        releaseHdmiSession();
         tuneSelectedInput();
     }
 
     private void setStatus(String message, boolean persistent) {
         status.setText(message + "\n字幕接收端口：38471  •  确定键：切换输入  •  菜单键：显示/隐藏设置");
         status.setVisibility(View.VISIBLE);
+        overlayModeButton.setVisibility(View.VISIBLE);
         status.removeCallbacks(hideStatus);
-        if (!persistent) {
-            status.postDelayed(hideStatus, 5000);
-        }
+        // This timeout controls only the diagnostic/menu chrome. The received subtitle view is
+        // independent and must remain visible when the bottom controls disappear.
+        status.postDelayed(hideStatus, persistent ? 8000L : 5000L);
     }
 
     private final Runnable hideStatus = new Runnable() {
         @Override
         public void run() {
             status.setVisibility(View.GONE);
+            overlayModeButton.setVisibility(View.GONE);
         }
     };
+
+    private final Runnable retryHdmiAudio = new Runnable() {
+        @Override public void run() { ensureHdmiAudio(); }
+    };
+
+    @SuppressWarnings("deprecation")
+    private void ensureHdmiAudio() {
+        requestHdmiAudioFocus();
+        if (audioManager != null && android.os.Build.VERSION.SDK_INT >= 23) {
+            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0);
+        }
+        if (tvView != null) tvView.setStreamVolume(1.0f);
+    }
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
@@ -314,6 +418,8 @@ public final class MainActivity extends Activity {
             int next = overlayModeButton.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE;
             overlayModeButton.setVisibility(next);
             status.setVisibility(next);
+            status.removeCallbacks(hideStatus);
+            if (next == View.VISIBLE) status.postDelayed(hideStatus, 8000L);
             return true;
         }
         return super.onKeyUp(keyCode, event);
@@ -333,7 +439,10 @@ public final class MainActivity extends Activity {
             startService(new Intent(this, OverlayService.class).setAction(OverlayService.ACTION_DISABLE_EXTERNAL));
         }
         updateOverlayModeUi();
-        if (selectedInput >= 0) requestHdmiAudioFocus();
+        if (!externalOverlayEnabled() && selectedInput >= 0) {
+            if (!tvSessionActive) tuneSelectedInput();
+            else requestHdmiAudioFocus();
+        }
     }
 
     @Override
@@ -358,19 +467,20 @@ public final class MainActivity extends Activity {
             subtitleReceiverRegistered = false;
         }
         if (!externalOverlayRequested()) stopService(new Intent(this, OverlayService.class));
+        releaseHdmiSession();
         super.onStop();
     }
 
     @Override
     protected void onPause() {
+        if (tvView != null) tvView.removeCallbacks(retryHdmiAudio);
         abandonHdmiAudioFocus();
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
-        abandonHdmiAudioFocus();
-        tvView.reset();
+        releaseHdmiSession();
         super.onDestroy();
     }
 
