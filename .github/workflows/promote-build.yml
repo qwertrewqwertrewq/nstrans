@@ -1,6 +1,9 @@
 name: Promote platform build artifacts
 
 on:
+  workflow_run:
+    workflows: ["Cross-platform builds"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       run_id:
@@ -19,22 +22,49 @@ permissions:
 jobs:
   promote:
     name: Publish WithLlama and RemoteOnly assets
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Resolve source build and release
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_RUN_ID: ${{ inputs.run_id }}
+          MANUAL_TAG: ${{ inputs.tag }}
+          COMPLETED_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            run_id="$MANUAL_RUN_ID"
+            release_tag="$MANUAL_TAG"
+          else
+            run_id="$COMPLETED_RUN_ID"
+            release_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" \
+              --jq '[.[] | select(.draft == false)][0].tag_name')
+          fi
+          [[ -n "$run_id" ]] || { echo "Source build run ID is missing." >&2; exit 1; }
+          [[ -n "$release_tag" && "$release_tag" != "null" ]] || { echo "No published Release was found." >&2; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "Promoting build run $run_id to $release_tag"
+
       - name: Download all platform artifacts
         uses: actions/download-artifact@v5
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
           pattern: NSTrans-*
           merge-multiple: true
           path: downloaded
 
       - name: Validate, version and checksum assets
         env:
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -76,7 +106,7 @@ jobs:
       - name: Upload assets to existing release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
         shell: bash
         run: |
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
