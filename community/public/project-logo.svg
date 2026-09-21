@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="NSTrans">
+  <defs>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M1 1l10 5-10 5z" fill="#10130f"/>
+    </marker>
+  </defs>
+  <path d="M238 42h-78C92 42 42 94 42 160v192c0 66 50 118 118 118h78z" fill="#0878e8" stroke="#10130f" stroke-width="8"/>
+  <path d="M274 42h78c68 0 118 52 118 118v192c0 66-50 118-118 118h-78z" fill="#ff151c" stroke="#10130f" stroke-width="8"/>
+  <circle cx="132" cy="132" r="33" fill="#10130f"/>
+  <circle cx="380" cy="380" r="33" fill="#10130f"/>
+  <text x="139" y="316" text-anchor="middle" font-family="Arial,'Noto Sans SC',sans-serif" font-size="150" font-weight="800" fill="#10130f">文</text>
+  <text x="366" y="307" text-anchor="middle" font-family="Arial,sans-serif" font-size="164" font-weight="800" fill="#10130f">A</text>
+  <path d="M194 178c32-35 72-40 111-18" fill="none" stroke="#10130f" stroke-width="15" stroke-linecap="round" marker-end="url(#arrow)"/>
+  <path d="M318 350c-34 34-75 38-113 15" fill="none" stroke="#10130f" stroke-width="15" stroke-linecap="round" marker-end="url(#arrow)"/>
+</svg>
