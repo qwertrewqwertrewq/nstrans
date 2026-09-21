@@ -117,9 +117,22 @@ if (-not $NoLlama -and $NeedsLlamaRuntime) {
   $Archive = Join-Path $Build "ollama-windows-amd64.zip"
   $Extracted = Join-Path $Build "ollama"
   $Base = if ($OllamaVersion) { "https://github.com/ollama/ollama/releases/download/v$OllamaVersion" } else { "https://github.com/ollama/ollama/releases/latest/download" }
-  Invoke-WebRequest -Uri "$Base/ollama-windows-amd64.zip" -OutFile $Archive
+  $ArchiveUrl = "$Base/ollama-windows-amd64.zip"
+  Write-Host "Downloading Ollama $OllamaVersion runtime (this archive is large and may take 30-40 minutes on a GitHub runner)..."
+  # Invoke-WebRequest does not emit useful transfer progress in GitHub Actions,
+  # making this step appear frozen. curl.exe reports live progress and retries
+  # transient CDN failures; speed-time also prevents a genuinely stalled
+  # connection from occupying the runner indefinitely.
+  & curl.exe --fail --location --retry 4 --retry-all-errors --connect-timeout 30 `
+    --speed-limit 1024 --speed-time 180 --progress-bar `
+    --output $Archive $ArchiveUrl
+  if ($LASTEXITCODE -ne 0) { throw "Ollama runtime download failed with curl exit code $LASTEXITCODE." }
+  $ArchiveBytes = (Get-Item $Archive).Length
+  if ($ArchiveBytes -lt 100000000) { throw "Downloaded Ollama archive is unexpectedly small: $ArchiveBytes bytes." }
+  Write-Host "Ollama archive downloaded: $([math]::Round($ArchiveBytes / 1MB, 1)) MiB. Extracting..."
   if (Test-Path $Extracted) { Remove-Item -Recurse -Force $Extracted }
   Expand-Archive -Path $Archive -DestinationPath $Extracted
+  Write-Host "Ollama archive extraction completed. Validating bundled backends..."
   $DownloadedExe = Get-ChildItem $Extracted -Filter "ollama.exe" -Recurse | Select-Object -First 1
   if (-not $DownloadedExe) { throw "ollama.exe is missing from the standalone archive." }
   Copy-Item $DownloadedExe.FullName $LlamaExe -Force
@@ -139,8 +152,10 @@ if (-not $NoLlama -and $NeedsLlamaRuntime) {
   }
 
   if (Test-Path (Join-Path $Runtime "lib")) { Remove-Item -Recurse -Force (Join-Path $Runtime "lib") }
+  Write-Host "Copying Ollama CPU, CUDA 13 and Vulkan runtimes into the application bundle..."
   Copy-Item $DownloadedLib (Join-Path $Runtime "lib") -Recurse -Force
   Set-Content -Path $LlamaVersionFile -Value $OllamaVersion -Encoding ascii
+  Write-Host "Ollama runtime $OllamaVersion is ready."
 }
 
 if (-not (Test-Path $MeikiExe) -or (-not $NoLlama -and (-not (Test-Path $LlamaExe) -or -not (Test-Path $OllamaLib)))) {
