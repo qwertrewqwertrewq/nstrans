@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio}, sync::{Arc, Mutex}, time::Duration};
-use tauri::{path::BaseDirectory, AppHandle, Manager, State};
+use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio}, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State};
 
 mod tv_cast;
 
@@ -15,6 +15,15 @@ mod ios_bridge;
 use std::os::unix::process::CommandExt;
 
 const LLAMA_ORIGIN: &str = "http://127.0.0.1:11435";
+const DEFAULT_TRANSLATEGEMMA_URL: &str = if cfg!(target_os = "ios") {
+  "https://nstrans.221129.xyz/download/model/ipados"
+} else if cfg!(target_os = "android") {
+  "https://nstrans.221129.xyz/download/model/android"
+} else if cfg!(target_os = "windows") {
+  "https://nstrans.221129.xyz/download/model/windows"
+} else {
+  "https://nstrans.221129.xyz/download/model/macos"
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +36,20 @@ struct LlamaBackendStatus { backend: String }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ModelPickerResult { available: bool, cancelled: bool, error: Option<String> }
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelDownloadProgress {
+  phase: String,
+  downloaded_bytes: u64,
+  total_bytes: Option<u64>,
+  percent: Option<f64>,
+}
+
+fn emit_model_progress(app: &AppHandle, phase: &str, downloaded_bytes: u64, total_bytes: Option<u64>) {
+  let percent = total_bytes.filter(|total| *total > 0).map(|total| downloaded_bytes as f64 / total as f64 * 100.0);
+  let _ = app.emit("model-download-progress", ModelDownloadProgress { phase: phase.into(), downloaded_bytes, total_bytes, percent });
+}
 
 #[tauri::command]
 fn client_platform() -> &'static str {
@@ -193,16 +216,6 @@ async fn has_translategemma(app: &AppHandle, shared: &Arc<Mutex<Option<Child>>>)
 }
 
 #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
-// Use the llama.cpp-converted text GGUF. Ollama's registry blob is a combined
-// text + vision container: Ollama can load it, but upstream llama.cpp expects
-// the vision projector separately and rejects the extra tensors.
-const MOBILE_TRANSLATEGEMMA_URL: &str = if cfg!(target_os = "ios") {
-  "https://huggingface.co/mradermacher/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it.IQ4_XS.gguf"
-} else {
-  "https://huggingface.co/Qwe1325/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it-q4_k_m.gguf"
-};
-
-#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
 fn mobile_model_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
   // Tauri's Android app_data_dir resolves to Context.dataDir, while the
   // native document picker stores durable app files under Context.filesDir.
@@ -220,27 +233,35 @@ fn mobile_model_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
   Ok(model)
 }
 
-#[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
-async fn download_mobile_model(app: &AppHandle, url: &str) -> Result<(), String> {
+async fn download_model(app: &AppHandle, url: &str, finished: &std::path::Path) -> Result<(), String> {
   let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "请输入有效的模型 URL".to_string())?;
   if !matches!(parsed.scheme(), "http" | "https") { return Err("模型 URL 仅支持 HTTP 或 HTTPS".into()); }
-  let finished = mobile_model_path(app)?;
   let partial = finished.with_extension("gguf.part");
+  if let Some(parent) = finished.parent() { std::fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
   let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(8)).timeout(Duration::from_secs(7200)).build().map_err(|error| error.to_string())?;
   let mut response = client.get(parsed).send().await.map_err(|error| format!("模型下载失败：{error}"))?;
   if !response.status().is_success() { return Err(format!("模型下载失败 ({})", response.status())); }
-  if response.content_length().is_some_and(|length| length > 16 * 1024 * 1024 * 1024) { return Err("远程模型超过 16GB 安全上限".into()); }
+  let total = response.content_length();
+  if total.is_some_and(|length| length > 16 * 1024 * 1024 * 1024) { return Err("远程模型超过 16GB 安全上限".into()); }
   let mut file = std::fs::File::create(&partial).map_err(|error| error.to_string())?;
   let mut downloaded = 0_u64;
+  let mut last_progress = Instant::now() - Duration::from_secs(1);
+  emit_model_progress(app, "downloading", 0, total);
   while let Some(chunk) = response.chunk().await.map_err(|error| format!("模型下载中断：{error}"))? {
     downloaded += chunk.len() as u64;
     if downloaded > 16 * 1024 * 1024 * 1024 { let _ = std::fs::remove_file(&partial); return Err("远程模型超过 16GB 安全上限".into()); }
     file.write_all(&chunk).map_err(|error| error.to_string())?;
+    if last_progress.elapsed() >= Duration::from_millis(200) || total.is_some_and(|value| downloaded >= value) {
+      emit_model_progress(app, "downloading", downloaded, total);
+      last_progress = Instant::now();
+    }
   }
   file.flush().map_err(|error| error.to_string())?;
+  emit_model_progress(app, "validating", downloaded, total);
   validate_gguf(&partial)?;
   if finished.exists() { std::fs::remove_file(&finished).map_err(|error| error.to_string())?; }
-  std::fs::rename(partial, finished).map_err(|error| error.to_string())
+  std::fs::rename(partial, finished).map_err(|error| error.to_string())?;
+  Ok(())
 }
 
 #[tauri::command]
@@ -274,8 +295,10 @@ async fn translategemma_status(app: AppHandle, state: State<'_, LlamaState>) -> 
 async fn translategemma_install(app: AppHandle, state: State<'_, LlamaState>) -> Result<RuntimeStatus, String> {
   #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
-    download_mobile_model(&app, MOBILE_TRANSLATEGEMMA_URL).await?;
+    let model = mobile_model_path(&app)?;
+    download_model(&app, DEFAULT_TRANSLATEGEMMA_URL, &model).await?;
     state.0.lock().map_err(|_| "无法锁定 llama.cpp 运行时".to_string())?.unload();
+    emit_model_progress(&app, "completed", std::fs::metadata(model).map(|item| item.len()).unwrap_or(0), None);
     return Ok(RuntimeStatus { available: true, error: None });
   }
   #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
@@ -286,12 +309,15 @@ async fn translategemma_install(app: AppHandle, state: State<'_, LlamaState>) ->
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   {
   let shared = state.0.clone();
-  ensure_llama_server(&app, &shared)?;
-  let payload = serde_json::json!({ "name": "translategemma:4b", "stream": false });
-  let response = reqwest::Client::new().post(format!("{LLAMA_ORIGIN}/api/pull")).json(&payload)
-    .timeout(Duration::from_secs(7200)).send().await.map_err(|error| format!("模型下载失败：{error}"))?;
-  if !response.status().is_success() { return Err(format!("模型下载失败 ({})", response.status())); }
-  Ok(RuntimeStatus { available: true, error: None })
+  let directory = app.path().app_cache_dir().map_err(|error| error.to_string())?.join("model-download");
+  let finished = directory.join("translategemma-4b-default.gguf");
+  download_model(&app, DEFAULT_TRANSLATEGEMMA_URL, &finished).await?;
+  emit_model_progress(&app, "importing", std::fs::metadata(&finished).map(|item| item.len()).unwrap_or(0), None);
+  let progress_app = app.clone();
+  let status = tauri::async_runtime::spawn_blocking(move || import_gguf(&app, &shared, &finished))
+    .await.map_err(|error| format!("模型导入任务失败：{error}"))??;
+  emit_model_progress(&progress_app, "completed", 0, None);
+  Ok(status)
   }
 }
 
@@ -436,8 +462,10 @@ async fn translategemma_pick_file(app: AppHandle, state: State<'_, LlamaState>) 
 async fn translategemma_install_url(app: AppHandle, state: State<'_, LlamaState>, url: String) -> Result<RuntimeStatus, String> {
   #[cfg(all(any(target_os = "android", target_os = "ios"), feature = "local-llama"))]
   {
-    download_mobile_model(&app, &url).await?;
+    let model = mobile_model_path(&app)?;
+    download_model(&app, &url, &model).await?;
     state.0.lock().map_err(|_| "无法锁定 llama.cpp 运行时".to_string())?.unload();
+    emit_model_progress(&app, "completed", std::fs::metadata(model).map(|item| item.len()).unwrap_or(0), None);
     return Ok(RuntimeStatus { available: true, error: None });
   }
   #[cfg(all(any(target_os = "android", target_os = "ios"), not(feature = "local-llama")))]
@@ -450,26 +478,15 @@ async fn translategemma_install_url(app: AppHandle, state: State<'_, LlamaState>
   let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "请输入有效的模型 URL".to_string())?;
   if !matches!(parsed.scheme(), "http" | "https") { return Err("模型 URL 仅支持 HTTP 或 HTTPS".into()); }
   let download_dir = app.path().app_cache_dir().map_err(|error| error.to_string())?.join("model-download");
-  std::fs::create_dir_all(&download_dir).map_err(|error| error.to_string())?;
-  let partial = download_dir.join("custom-model.gguf.part");
   let finished = download_dir.join("custom-model.gguf");
-  let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(8)).timeout(Duration::from_secs(7200)).build().map_err(|error| error.to_string())?;
-  let mut response = client.get(parsed).send().await.map_err(|error| format!("模型下载失败：{error}"))?;
-  if !response.status().is_success() { return Err(format!("模型下载失败 ({})", response.status())); }
-  if response.content_length().is_some_and(|length| length > 16 * 1024 * 1024 * 1024) { return Err("远程模型超过 16GB 安全上限".into()); }
-  let mut file = std::fs::File::create(&partial).map_err(|error| error.to_string())?;
-  let mut downloaded = 0_u64;
-  while let Some(chunk) = response.chunk().await.map_err(|error| format!("模型下载中断：{error}"))? {
-    downloaded += chunk.len() as u64;
-    if downloaded > 16 * 1024 * 1024 * 1024 { let _ = std::fs::remove_file(&partial); return Err("远程模型超过 16GB 安全上限".into()); }
-    file.write_all(&chunk).map_err(|error| error.to_string())?;
-  }
-  file.flush().map_err(|error| error.to_string())?;
-  if finished.exists() { std::fs::remove_file(&finished).map_err(|error| error.to_string())?; }
-  std::fs::rename(&partial, &finished).map_err(|error| error.to_string())?;
+  download_model(&app, parsed.as_str(), &finished).await?;
+  emit_model_progress(&app, "importing", std::fs::metadata(&finished).map(|item| item.len()).unwrap_or(0), None);
   let shared = state.0.clone();
-  tauri::async_runtime::spawn_blocking(move || import_gguf(&app, &shared, &finished))
-    .await.map_err(|error| format!("模型导入任务失败：{error}"))?
+  let progress_app = app.clone();
+  let status = tauri::async_runtime::spawn_blocking(move || import_gguf(&app, &shared, &finished))
+    .await.map_err(|error| format!("模型导入任务失败：{error}"))??;
+  emit_model_progress(&progress_app, "completed", 0, None);
+  Ok(status)
   }
 }
 

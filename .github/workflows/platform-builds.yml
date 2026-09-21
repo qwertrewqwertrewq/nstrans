@@ -134,6 +134,20 @@ jobs:
           npm run android:build:remote
           mkdir -p artifacts/RemoteOnly
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/RemoteOnly/NSTrans-Android-arm64-debug-RemoteOnly.apk
+      - name: Verify Android variants
+        run: |
+          with_apk=artifacts/WithLlama/NSTrans-Android-arm64-debug-WithLlama.apk
+          remote_apk=artifacts/RemoteOnly/NSTrans-Android-arm64-debug-RemoteOnly.apk
+          mkdir -p artifacts/android-verify
+          unzip -p "$with_apk" lib/arm64-v8a/libnstrans_lib.so > artifacts/android-verify/with-llama.so
+          unzip -p "$remote_apk" lib/arm64-v8a/libnstrans_lib.so > artifacts/android-verify/remote-only.so
+          with_size=$(stat -c%s "$with_apk")
+          remote_size=$(stat -c%s "$remote_apk")
+          with_so_size=$(stat -c%s artifacts/android-verify/with-llama.so)
+          remote_so_size=$(stat -c%s artifacts/android-verify/remote-only.so)
+          echo "APK bytes: WithLlama=$with_size RemoteOnly=$remote_size"
+          echo "libnstrans_lib.so bytes: WithLlama=$with_so_size RemoteOnly=$remote_so_size"
+          test "$with_so_size" -gt $((remote_so_size + 1048576)) || { echo "RemoteOnly appears to contain the local llama runtime" >&2; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: NSTrans-Android-arm64-debug-WithLlama

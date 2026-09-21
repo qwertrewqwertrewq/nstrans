@@ -4,7 +4,7 @@ import './App.css'
 import { DialogueStabilizer } from './services/dialogueStabilizer'
 import { disposeOcr, fitCaptureSize, recognizeJapanese, type OcrProgress } from './services/ocr'
 import { TranslationRouter, defaultRoutingSettings, type TerminologyItem } from './services/translationRouter'
-import { getTranslateGemmaBackend, installTranslateGemma, installTranslateGemmaFromUrl, pickAndImportTranslateGemmaFile, setTranslateGemmaBackend, translationRuntimes, translationRuntimeStatus, unloadTranslateGemma, type LlamaBackend } from './services/translationRuntime'
+import { getTranslateGemmaBackend, installTranslateGemma, installTranslateGemmaFromUrl, pickAndImportTranslateGemmaFile, setTranslateGemmaBackend, translationRuntimes, translationRuntimeStatus, unloadTranslateGemma, type LlamaBackend, type ModelDownloadProgress } from './services/translationRuntime'
 import { ConfigurableEntityLookup, EntityLearningQueue } from './services/entityLookup'
 import { browserTranslationMemory } from './services/translationMemory'
 import { browserDictionaryPacks, HttpDictionaryDistributionProvider } from './services/dictionaryPacks'
@@ -72,6 +72,21 @@ function errorMessage(reason: unknown, fallback: string) {
     }
   }
   return fallback
+}
+
+function formatModelBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`
+}
+
+function modelProgressLabel(progress: ModelDownloadProgress) {
+  if (progress.phase === 'validating') return '下载完成，正在校验模型…'
+  if (progress.phase === 'importing') return '模型校验通过，正在导入运行时…'
+  if (progress.phase === 'completed') return '模型已下载并启用'
+  const amount = progress.totalBytes
+    ? `${formatModelBytes(progress.downloadedBytes)} / ${formatModelBytes(progress.totalBytes)}`
+    : formatModelBytes(progress.downloadedBytes)
+  return `正在下载 · ${amount}${progress.percent !== undefined ? ` · ${progress.percent.toFixed(1)}%` : ''}`
 }
 
 function TranslationOverlay({ region, frameSize, videoRect, overlay }: { region: TextRegion; frameSize: { captureWidth: number; captureHeight: number }; videoRect: { left: number; top: number; width: number; height: number }; overlay: OverlaySettings }) {
@@ -198,6 +213,7 @@ function App() {
   const [installingModel, setInstallingModel] = useState(false)
   const [modelUrl, setModelUrl] = useState('')
   const [modelStatusMessage, setModelStatusMessage] = useState('')
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null)
   // Mobile CPUs need a short idle window between ONNX passes so preview and
   // llama.cpp remain responsive. Desktop keeps the lower-latency default.
   const [ocr, setOcr] = useState<OcrSettings>(() => {
@@ -1130,6 +1146,7 @@ function App() {
   const runModelAction = async (action: () => Promise<void>, working: string, completed: string) => {
     setInstallingModel(true)
     setError('')
+    setModelDownloadProgress(null)
     setModelStatusMessage(working)
     try {
       await action()
@@ -1143,14 +1160,14 @@ function App() {
       setInstallingModel(false)
     }
   }
-  const downloadTranslateGemma = () => runModelAction(installTranslateGemma, `正在下载 TranslateGemma 4B ${clientPlatform === 'ios' ? 'IQ4_XS（约 2.4GB）' : clientPlatform === 'android' ? 'Q4_K_M（约 2.5GB）' : 'Q4_K_M（约 3.3GB）'}…`, 'TranslateGemma 4B 已启用')
+  const downloadTranslateGemma = () => runModelAction(() => installTranslateGemma(setModelDownloadProgress), `正在从 NSTrans 下载节点获取 TranslateGemma 4B ${clientPlatform === 'ios' ? 'IQ4_XS（2.28GB）' : clientPlatform === 'android' ? 'Q4_K_M（2.49GB）' : 'Q4_K_M（3.30GB）'}…`, 'TranslateGemma 4B 已启用')
   const downloadModelUrl = () => {
     const url = modelUrl.trim()
     if (!url) {
       setError('请先输入 GGUF 模型 URL')
       return
     }
-    void runModelAction(() => installTranslateGemmaFromUrl(url), '正在下载并校验指定 URL…', 'URL 模型已导入并启用')
+    void runModelAction(() => installTranslateGemmaFromUrl(url, setModelDownloadProgress), '正在下载并校验指定 URL…', 'URL 模型已导入并启用')
   }
   const selectLocalModel = async () => {
     setInstallingModel(true)
@@ -1601,8 +1618,14 @@ function App() {
                 <div className="model-manager">
                   <button className="scan-button" disabled={installingModel} onClick={() => void downloadTranslateGemma()}>
                     {installingModel ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}
-                    官方远程下载
+                    NSTrans 下载节点
                   </button>
+                  {modelDownloadProgress && (
+                    <div className="model-download-progress" role="progressbar" aria-label="TranslateGemma 模型下载进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(modelDownloadProgress.percent ?? (modelDownloadProgress.phase === 'completed' ? 100 : 0))}>
+                      <div><span style={{ width: `${Math.min(100, modelDownloadProgress.percent ?? (modelDownloadProgress.phase === 'completed' ? 100 : modelDownloadProgress.phase === 'downloading' ? 0 : 100))}%` }} /></div>
+                      <small>{modelProgressLabel(modelDownloadProgress)}</small>
+                    </div>
+                  )}
                   <div className="model-url-row">
                     <input type="url" value={modelUrl} disabled={installingModel} onChange={(event) => setModelUrl(event.target.value)} placeholder="https://…/model.gguf" aria-label="GGUF 模型 URL" />
                     <button className="secondary" disabled={installingModel} onClick={downloadModelUrl}>

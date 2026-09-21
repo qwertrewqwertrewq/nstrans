@@ -191,6 +191,17 @@ jobs:
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk"
           npm run android:build:remote
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-RemoteOnly.apk"
+          with_apk="release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk"
+          remote_apk="release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-RemoteOnly.apk"
+          unzip -p "$with_apk" lib/arm64-v8a/libnstrans_lib.so > /tmp/nstrans-with-llama.so
+          unzip -p "$remote_apk" lib/arm64-v8a/libnstrans_lib.so > /tmp/nstrans-remote-only.so
+          with_size=$(stat -c%s "$with_apk")
+          remote_size=$(stat -c%s "$remote_apk")
+          with_so_size=$(stat -c%s /tmp/nstrans-with-llama.so)
+          remote_so_size=$(stat -c%s /tmp/nstrans-remote-only.so)
+          echo "APK bytes: WithLlama=$with_size RemoteOnly=$remote_size"
+          echo "libnstrans_lib.so bytes: WithLlama=$with_so_size RemoteOnly=$remote_so_size"
+          test "$with_so_size" -gt $((remote_so_size + 1048576)) || { echo "RemoteOnly appears to contain the local llama runtime" >&2; exit 1; }
           cd release-assets
           for file in *.apk; do sha256sum "$file" > "$file.sha256"; done
 

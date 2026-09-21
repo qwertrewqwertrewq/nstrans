@@ -2,6 +2,7 @@ import type { TranslationEngineId } from '../types'
 import type { GlossaryEntry } from '../gameAdapters/types'
 import type { TranslationRequest } from './translator'
 import { invoke, isTauri } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { buildTranslateGemmaBatchPrompt, buildTranslateGemmaPrompt } from './translateGemmaPrompt'
 import { writeDiagnosticLog } from './diagnosticLog'
 import { qwenTranslateMany } from './qwenFlash'
@@ -11,6 +12,12 @@ export type ConversationTurn = { sources: string[]; translations: string[] }
 export type TerminologyResearch = { term: string; query: string; evidence: string[]; sourceUrls: string[] }
 export type LlamaBackend = 'cuda' | 'vulkan' | 'cpu'
 export type LlamaBackendStatus = { backend: LlamaBackend }
+export type ModelDownloadProgress = {
+  phase: 'downloading' | 'validating' | 'importing' | 'completed'
+  downloadedBytes: number
+  totalBytes?: number
+  percent?: number
+}
 export type RuntimeRequest = {
   requests: TranslationRequest[]
   history?: ConversationTurn[]
@@ -135,15 +142,25 @@ export async function setTranslateGemmaBackend(backend: LlamaBackend): Promise<L
   return invoke<LlamaBackendStatus>('translategemma_set_backend', { backend })
 }
 
-export async function installTranslateGemma() {
+async function invokeModelInstall(command: 'translategemma_install' | 'translategemma_install_url', args: Record<string, unknown> | undefined, onProgress?: (progress: ModelDownloadProgress) => void) {
+  let unlisten: UnlistenFn | undefined
+  if (onProgress) unlisten = await listen<ModelDownloadProgress>('model-download-progress', (event) => onProgress(event.payload))
+  try {
+    return await invoke<{ available: boolean; error?: string }>(command, args)
+  } finally {
+    unlisten?.()
+  }
+}
+
+export async function installTranslateGemma(onProgress?: (progress: ModelDownloadProgress) => void) {
   if (!isTauri()) throw new Error('模型下载仅由 NSTrans 桌面客户端管理')
-  const result = await invoke<{ available: boolean; error?: string }>('translategemma_install')
+  const result = await invokeModelInstall('translategemma_install', undefined, onProgress)
   if (!result.available) throw new Error(result.error || 'TranslateGemma 4B 安装失败')
 }
 
-export async function installTranslateGemmaFromUrl(url: string) {
+export async function installTranslateGemmaFromUrl(url: string, onProgress?: (progress: ModelDownloadProgress) => void) {
   if (!isTauri()) throw new Error('URL 模型下载仅由 NSTrans 桌面客户端管理')
-  const result = await invoke<{ available: boolean; error?: string }>('translategemma_install_url', { url })
+  const result = await invokeModelInstall('translategemma_install_url', { url }, onProgress)
   if (!result.available) throw new Error(result.error || 'URL 模型安装失败')
 }
 
