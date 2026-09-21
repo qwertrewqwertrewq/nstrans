@@ -20,6 +20,15 @@
       "migrations_dir": "migrations"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "DOWNLOADS",
+      "bucket_name": "nstrans-downloads"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "vars": {
     "SITE_ORIGIN": "https://nstrans.221129.xyz",
     "ADMIN_GITHUB_LOGINS": "qwertrewqwertrewq",

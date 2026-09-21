@@ -8,6 +8,7 @@ Cloudflare Worker + D1 community dictionary service for NSTrans.
 - Worker fallback: `https://nstrans-community.ynqjzrjzrj.workers.dev`
 - GitHub OAuth callback: `https://nstrans.221129.xyz/auth/github/callback`
 - D1: `nstrans-community`
+- R2 downloads: `nstrans-downloads`
 
 Before OAuth can be used, configure both Worker secrets:
 
@@ -22,6 +23,17 @@ Deploy schema and Worker:
 npm run community:migrate
 npm run community:deploy
 ```
+
+The Worker checks GitHub Releases every five minutes and mirrors only the nine
+binary files linked by `/download` into R2. The manifest is switched only after
+all current-release binaries are present; objects from older releases are then
+deleted. Public downloads are served from
+`https://nstrans.221129.xyz/download/file/{platform}` without redirecting users
+to GitHub.
+
+For an immediate manual sync after deployment, configure `RELEASE_SYNC_TOKEN`
+as a Worker secret and call `POST /api/admin/releases/sync` with the same bearer
+token.
 
 ## Client API
 

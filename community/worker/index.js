@@ -3,6 +3,9 @@ const encoder = new TextEncoder()
 const githubRepository = 'qwertrewqwertrewq/nstrans'
 const githubReleasesUrl = `https://api.github.com/repos/${githubRepository}/releases?per_page=30`
 const githubReleasePage = `https://github.com/${githubRepository}/releases`
+const downloadManifestKey = 'release-manifest.json'
+const downloadObjectPrefix = 'release/'
+const githubHeaders = Object.freeze({ accept: 'application/vnd.github+json', 'user-agent': 'NSTrans Community', 'x-github-api-version': '2022-11-28' })
 const downloadAssets = Object.freeze({
   'macos-with-llama': { prefix: 'NSTrans-', suffix: '-macOS-arm64-WithLlama.dmg' },
   'macos-remote-only': { prefix: 'NSTrans-', suffix: '-macOS-arm64-RemoteOnly.dmg' },
@@ -19,6 +22,9 @@ export default {
   async fetch(request, env) {
     try { return await route(request, env) }
     catch (error) { console.error(error); return json({ error: '服务器内部错误' }, 500) }
+  },
+  async scheduled(_controller, env, context) {
+    context.waitUntil(syncLatestRelease(env))
   },
 }
 
@@ -49,45 +55,95 @@ async function route(request, env) {
   if (/^\/api\/v1\/translations\/\d+$/u.test(path) && request.method === 'PATCH') return apiEditTranslation(request, env, Number(path.split('/')[4]))
   if (/^\/api\/v1\/dictionaries\/[^/]+$/u.test(path) && request.method === 'GET') return dictionary(env, decodeURIComponent(path.split('/')[4]))
   if (path === '/api/v1/contributions' && request.method === 'POST') return uploadContributions(request, env)
-  if (path.startsWith('/download/file/')) return downloadFile(request, path.slice('/download/file/'.length))
+  if (path === '/api/admin/releases/sync' && request.method === 'POST') return syncReleaseNow(request, env)
+  if (path.startsWith('/download/file/')) return downloadFile(request, env, path.slice('/download/file/'.length))
   if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
 }
 
-async function downloadFile(request, key) {
+async function downloadFile(request, env, key) {
   if (!['GET', 'HEAD'].includes(request.method)) return json({ error: '下载入口仅支持 GET 或 HEAD' }, 405)
-  const rule = downloadAssets[key]
-  if (!rule) return json({ error: '未知下载类型' }, 404)
-  try {
-    const releases = await githubReleases(request)
-    for (const release of releases) {
-      if (release?.draft || !Array.isArray(release?.assets)) continue
-      const matches = release.assets
-        .filter((asset) => asset?.state === 'uploaded' && asset.name?.startsWith(rule.prefix) && asset.name.endsWith(rule.suffix))
-        .sort((left, right) => String(right.updated_at || '').localeCompare(String(left.updated_at || '')))
-      if (!matches.length) continue
-      const target = new URL(matches[0].browser_download_url)
-      if (target.protocol !== 'https:' || target.hostname !== 'github.com' || !target.pathname.startsWith(`/${githubRepository}/releases/download/`)) throw new Error('GitHub 返回了无效下载地址')
-      return new Response(null, { status: 302, headers: { location: target.toString(), 'cache-control': 'public, max-age=300' } })
-    }
-    console.warn(`No GitHub release asset found for ${key}`)
-  } catch (error) {
-    console.error(`Unable to resolve GitHub release asset for ${key}`, error)
+  if (!downloadAssets[key]) return json({ error: '未知下载类型' }, 404)
+  const manifestObject = await env.DOWNLOADS.get(downloadManifestKey)
+  if (!manifestObject) return json({ error: '下载镜像正在初始化，请稍后重试', releasePage: githubReleasePage }, 503)
+  const manifest = await manifestObject.json(), entry = manifest?.assets?.[key]
+  if (!entry?.objectKey || !entry?.filename) return json({ error: '最新发布中没有该平台文件', releasePage: githubReleasePage }, 404)
+  const object = request.method === 'HEAD'
+    ? await env.DOWNLOADS.head(entry.objectKey)
+    : await env.DOWNLOADS.get(entry.objectKey, { onlyIf: request.headers, range: request.headers })
+  if (!object) return json({ error: 'R2 下载对象暂不可用，请稍后重试', releasePage: githubReleasePage }, 503)
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set('etag', object.httpEtag)
+  headers.set('accept-ranges', 'bytes')
+  headers.set('cache-control', 'public, max-age=300')
+  headers.set('content-disposition', `attachment; filename="${entry.filename}"`)
+  if (request.method === 'HEAD') {
+    headers.set('content-length', String(object.size))
+    return new Response(null, { status: 200, headers })
   }
-  return new Response(null, { status: 302, headers: { location: githubReleasePage, 'cache-control': 'no-store' } })
+  if (!('body' in object)) return new Response(null, { status: 412, headers })
+  let status = 200
+  if (object.range && Number.isFinite(object.range.offset) && Number.isFinite(object.range.length)) {
+    status = 206
+    headers.set('content-range', `bytes ${object.range.offset}-${object.range.offset + object.range.length - 1}/${object.size}`)
+    headers.set('content-length', String(object.range.length))
+  } else {
+    headers.set('content-length', String(object.size))
+  }
+  return new Response(object.body, { status, headers })
 }
 
-async function githubReleases(request) {
-  const cache = caches.default
-  const cacheKey = new Request(new URL('/__nstrans_cache/github_releases', request.url), { method: 'GET' })
-  const cached = await cache.match(cacheKey)
-  if (cached) return cached.json()
-  const response = await fetch(githubReleasesUrl, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'NSTrans Community', 'x-github-api-version': '2022-11-28' } })
+async function syncReleaseNow(request, env) {
+  const header = request.headers.get('authorization') || '', provided = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  if (!env.RELEASE_SYNC_TOKEN || !provided || !safeEqual(provided, env.RELEASE_SYNC_TOKEN)) return json({ error: '同步凭据无效' }, 401)
+  return json(await syncLatestRelease(env))
+}
+
+async function syncLatestRelease(env) {
+  const response = await fetch(githubReleasesUrl, { headers: githubHeaders })
   if (!response.ok) throw new Error(`GitHub Releases API ${response.status}`)
-  const releases = await response.json()
-  const cachedResponse = new Response(JSON.stringify(releases), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=600' } })
-  await cache.put(cacheKey, cachedResponse)
-  return releases
+  const release = (await response.json()).find((item) => !item?.draft && Array.isArray(item?.assets))
+  if (!release) throw new Error('GitHub 没有可同步的 Release')
+  const selected = {}, missing = []
+  for (const [key, rule] of Object.entries(downloadAssets)) {
+    const asset = release.assets
+      .filter((item) => item?.state === 'uploaded' && item.name?.startsWith(rule.prefix) && item.name.endsWith(rule.suffix))
+      .sort((left, right) => String(right.updated_at || '').localeCompare(String(left.updated_at || '')))[0]
+    if (!asset) missing.push(key)
+    else selected[key] = asset
+  }
+  if (missing.length) throw new Error(`最新 Release 缺少下载页资产：${missing.join(', ')}`)
+
+  const manifest = { tag: release.tag_name, releaseId: release.id, syncedAt: new Date().toISOString(), assets: {} }
+  const desiredKeys = new Set()
+  for (const [key, asset] of Object.entries(selected)) {
+    const objectKey = `${downloadObjectPrefix}${asset.name}`
+    desiredKeys.add(objectKey)
+    const existing = await env.DOWNLOADS.head(objectKey)
+    if (!existing || existing.customMetadata?.githubAssetId !== String(asset.id) || existing.size !== asset.size) {
+      const assetUrl = new URL(asset.browser_download_url)
+      if (assetUrl.protocol !== 'https:' || assetUrl.hostname !== 'github.com' || !assetUrl.pathname.startsWith(`/${githubRepository}/releases/download/`)) throw new Error(`GitHub 返回了无效下载地址：${asset.name}`)
+      const binary = await fetch(assetUrl, { headers: { 'user-agent': githubHeaders['user-agent'] }, redirect: 'follow' })
+      if (!binary.ok || !binary.body) throw new Error(`下载 ${asset.name} 失败：${binary.status}`)
+      await env.DOWNLOADS.put(objectKey, binary.body, {
+        httpMetadata: { contentType: binary.headers.get('content-type') || 'application/octet-stream', contentDisposition: `attachment; filename="${asset.name}"`, cacheControl: 'public, max-age=300' },
+        customMetadata: { githubAssetId: String(asset.id), releaseId: String(release.id), tag: String(release.tag_name || '') },
+      })
+    }
+    manifest.assets[key] = { objectKey, filename: asset.name, size: asset.size, githubAssetId: asset.id }
+  }
+
+  await env.DOWNLOADS.put(downloadManifestKey, JSON.stringify(manifest), { httpMetadata: { contentType: 'application/json; charset=utf-8', cacheControl: 'no-store' } })
+  let cursor
+  do {
+    const page = await env.DOWNLOADS.list({ prefix: downloadObjectPrefix, cursor })
+    const stale = page.objects.map((item) => item.key).filter((key) => !desiredKeys.has(key))
+    if (stale.length) await env.DOWNLOADS.delete(stale)
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  console.log(`R2 release mirror synced: ${manifest.tag}, ${Object.keys(manifest.assets).length} assets`)
+  return { ok: true, tag: manifest.tag, assets: Object.keys(manifest.assets).length }
 }
 
 async function startGithubAuth(env) {
