@@ -5,6 +5,7 @@ const githubReleasesUrl = `https://api.github.com/repos/${githubRepository}/rele
 const githubReleasePage = `https://github.com/${githubRepository}/releases`
 const downloadManifestKey = 'release-manifest.json'
 const downloadObjectPrefix = 'release/'
+const modelObjectPrefix = 'models/'
 const githubHeaders = Object.freeze({ accept: 'application/vnd.github+json', 'user-agent': 'NSTrans Community', 'x-github-api-version': '2022-11-28' })
 const downloadAssets = Object.freeze({
   'macos-with-llama': { prefix: 'NSTrans-', suffix: '-macOS-arm64-WithLlama.dmg' },
@@ -16,6 +17,36 @@ const downloadAssets = Object.freeze({
   'android-with-llama': { prefix: 'NSTrans-', suffix: '-Android-arm64-debug-WithLlama.apk' },
   'android-remote-only': { prefix: 'NSTrans-', suffix: '-Android-arm64-debug-RemoteOnly.apk' },
   tv: { prefix: 'NSTrans-TV-', suffix: '-Android-debug.apk' },
+})
+const modelAssets = Object.freeze({
+  macos: {
+    objectKey: `${modelObjectPrefix}translategemma-4b-ollama-q4_k_m.gguf`,
+    filename: 'translategemma-4b-ollama-q4_k_m.gguf',
+    size: 3298866368,
+    sha256: 'bdbf939b402e2f88fbe3e918beb777813009335756b4c17be7fe008dfe4815d4',
+    source: 'https://registry.ollama.ai/v2/library/translategemma/blobs/sha256:bdbf939b402e2f88fbe3e918beb777813009335756b4c17be7fe008dfe4815d4',
+  },
+  windows: {
+    objectKey: `${modelObjectPrefix}translategemma-4b-ollama-q4_k_m.gguf`,
+    filename: 'translategemma-4b-ollama-q4_k_m.gguf',
+    size: 3298866368,
+    sha256: 'bdbf939b402e2f88fbe3e918beb777813009335756b4c17be7fe008dfe4815d4',
+    source: 'https://registry.ollama.ai/v2/library/translategemma/blobs/sha256:bdbf939b402e2f88fbe3e918beb777813009335756b4c17be7fe008dfe4815d4',
+  },
+  ipados: {
+    objectKey: `${modelObjectPrefix}translategemma-4b-it.IQ4_XS.gguf`,
+    filename: 'translategemma-4b-it.IQ4_XS.gguf',
+    size: 2279641600,
+    sha256: '2bc7f1b1f1ed573c0c56d9fe3073103a7c2bddfe5e228df081bb71149283b60a',
+    source: 'https://huggingface.co/mradermacher/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it.IQ4_XS.gguf',
+  },
+  android: {
+    objectKey: `${modelObjectPrefix}translategemma-4b-it-q4_k_m.gguf`,
+    filename: 'translategemma-4b-it-q4_k_m.gguf',
+    size: 2489909312,
+    sha256: '526747309109c016db547c6fc1c7b0c9c286b5e7a7556827b5419fd9543a09cd',
+    source: 'https://huggingface.co/Qwe1325/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it-q4_k_m.gguf',
+  },
 })
 
 export default {
@@ -56,9 +87,77 @@ async function route(request, env) {
   if (/^\/api\/v1\/dictionaries\/[^/]+$/u.test(path) && request.method === 'GET') return dictionary(env, decodeURIComponent(path.split('/')[4]))
   if (path === '/api/v1/contributions' && request.method === 'POST') return uploadContributions(request, env)
   if (path === '/api/admin/releases/sync' && request.method === 'POST') return syncReleaseNow(request, env)
+  if (/^\/api\/admin\/models\/sync\/[^/]+$/u.test(path) && request.method === 'POST') return syncModelNow(request, env, decodeURIComponent(path.split('/').pop()))
   if (path.startsWith('/download/file/')) return downloadFile(request, env, path.slice('/download/file/'.length))
+  if (path.startsWith('/download/model/')) return downloadModel(request, env, path.slice('/download/model/'.length))
+  if (path === '/download/model-notice') return modelNotice()
   if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
+}
+
+async function downloadModel(request, env, platform) {
+  if (!['GET', 'HEAD'].includes(request.method)) return json({ error: '下载入口仅支持 GET 或 HEAD' }, 405)
+  const entry = modelAssets[platform]
+  if (!entry) return json({ error: '未知模型类型' }, 404)
+  const object = request.method === 'HEAD'
+    ? await env.DOWNLOADS.head(entry.objectKey)
+    : await env.DOWNLOADS.get(entry.objectKey, { onlyIf: request.headers, range: request.headers })
+  if (!object) return json({ error: '模型镜像正在初始化，请稍后重试' }, 503)
+  if (object.size !== entry.size) return json({ error: '模型镜像校验未完成，请稍后重试' }, 503)
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set('etag', object.httpEtag)
+  headers.set('accept-ranges', 'bytes')
+  headers.set('cache-control', 'public, max-age=86400, immutable')
+  headers.set('content-disposition', `attachment; filename="${entry.filename}"`)
+  headers.set('x-checksum-sha256', entry.sha256)
+  headers.set('link', '</download/model-notice>; rel="license"')
+  if (request.method === 'HEAD') {
+    headers.set('content-length', String(object.size))
+    return new Response(null, { status: 200, headers })
+  }
+  if (!('body' in object)) return new Response(null, { status: 412, headers })
+  let status = 200
+  if (object.range && Number.isFinite(object.range.offset) && Number.isFinite(object.range.length)) {
+    status = 206
+    headers.set('content-range', `bytes ${object.range.offset}-${object.range.offset + object.range.length - 1}/${object.size}`)
+    headers.set('content-length', String(object.range.length))
+  } else {
+    headers.set('content-length', String(object.size))
+  }
+  return new Response(object.body, { status, headers })
+}
+
+function modelNotice() {
+  return new Response('Gemma is provided under and subject to the Gemma Terms of Use found at https://ai.google.dev/gemma/terms\n', {
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'content-disposition': 'attachment; filename="NOTICE.txt"',
+      'cache-control': 'public, max-age=86400',
+    },
+  })
+}
+
+async function syncModelNow(request, env, platform) {
+  const header = request.headers.get('authorization') || '', provided = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  if (!env.RELEASE_SYNC_TOKEN || !provided || !safeEqual(provided, env.RELEASE_SYNC_TOKEN)) return json({ error: '同步凭据无效' }, 401)
+  const entry = modelAssets[platform]
+  if (!entry) return json({ error: '未知模型类型' }, 404)
+  const existing = await env.DOWNLOADS.head(entry.objectKey)
+  if (existing?.size === entry.size) return json({ ok: true, platform, size: existing.size, cached: true })
+  const source = await fetch(entry.source, { redirect: 'follow' })
+  if (!source.ok || !source.body) throw new Error(`模型源下载失败：${source.status}`)
+  const contentLength = Number(source.headers.get('content-length') || 0)
+  if (contentLength && contentLength !== entry.size) throw new Error(`模型源大小不符：预期 ${entry.size}，实际 ${contentLength}`)
+  const uploaded = await env.DOWNLOADS.put(entry.objectKey, source.body, {
+    httpMetadata: { contentType: 'application/octet-stream', contentDisposition: `attachment; filename="${entry.filename}"`, cacheControl: 'public, max-age=86400, immutable' },
+    customMetadata: { sha256: entry.sha256, source: new URL(entry.source).hostname },
+  })
+  if (uploaded.size !== entry.size) {
+    await env.DOWNLOADS.delete(entry.objectKey)
+    throw new Error(`R2 模型大小不符：预期 ${entry.size}，实际 ${uploaded.size}`)
+  }
+  return json({ ok: true, platform, size: uploaded.size, cached: false })
 }
 
 async function downloadFile(request, env, key) {

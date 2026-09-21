@@ -28,6 +28,17 @@
       <article class="release-card"><header><span>04 / MOBILE</span><h2>Android</h2><p>arm64 · 调试签名 APK</p></header><div class="release-actions"><a href="/download/file/android-with-llama"><b>WithLlama</b><small>本地 llama.cpp · 实验性</small><i>↓</i></a><a href="/download/file/android-remote-only"><b>RemoteOnly</b><small>仅使用远程核心模型</small><i>↓</i></a></div></article>
     </section>
     <section class="tv-release"><div><span class="kicker">TV COMPANION</span><h2>NSTrans TV</h2><p>用于 Android 电视的 HDMI 与局域网字幕客户端；默认 App 内显示，也可由用户授权后启用 App 外字幕。</p></div><a class="button" href="/download/file/tv">下载 TV APK <b>↓</b></a></section>
+    <section class="model-release" aria-labelledby="model-download-title">
+      <header><span class="kicker">LOCAL MODEL / OPTIONAL</span><h2 id="model-download-title">TranslateGemma 4B 模型镜像</h2><p>WithLlama 构建首次使用时才需要模型；RemoteOnly 无需下载。四个平台入口对应当前客户端默认量化，文件由 Cloudflare R2 提供。</p></header>
+      <div class="model-grid">
+        <a href="/download/model/macos"><span>macOS</span><b>Q4_K_M · Ollama</b><small>3.30 GB · 与 Windows 共用对象</small><i>↓</i></a>
+        <a href="/download/model/windows"><span>Windows</span><b>Q4_K_M · Ollama</b><small>3.30 GB · 与 macOS 共用对象</small><i>↓</i></a>
+        <a href="/download/model/ipados"><span>iPadOS</span><b>IQ4_XS · llama.cpp</b><small>2.28 GB · 8 GB 设备实测</small><i>↓</i></a>
+        <a href="/download/model/android"><span>Android</span><b>Q4_K_M · llama.cpp</b><small>2.49 GB · 实验性</small><i>↓</i></a>
+      </div>
+      <p class="model-sources">上游来源：<a href="https://ollama.com/library/translategemma:4b" target="_blank" rel="noreferrer">macOS / Windows · Ollama Library ↗</a><a href="https://huggingface.co/mradermacher/translategemma-4b-it-GGUF" target="_blank" rel="noreferrer">iPadOS · mradermacher GGUF ↗</a><a href="https://huggingface.co/Qwe1325/translategemma-4b-it-GGUF" target="_blank" rel="noreferrer">Android · Qwe1325 GGUF ↗</a></p>
+      <div class="model-legal"><strong>模型许可与兼容性</strong><p>下载或使用即表示同意 <a href="https://ai.google.dev/gemma/terms" target="_blank" rel="noreferrer">Gemma Terms of Use ↗</a> 与其中引用的使用限制；模型不适用 NSTrans 的 Apache-2.0 许可。<a href="/download/model-notice">下载 NOTICE.txt</a>。macOS/Windows 文件是 Ollama 组合 blob，不适用于移动端 llama.cpp；iPadOS/Android 为社区转换量化，不能保证跨平台互换。</p></div>
+    </section>
     <aside class="download-notice"><strong>安装前须知</strong><p>macOS 构建未做 Developer ID 公证；iPadOS 需要使用自己的证书自签；Android 使用调试签名。每个核心客户端安装包在 GitHub Release 中均提供同名 `.sha256` 文件。</p></aside>
   </main>
   <footer class="simple-footer"><a class="brand" href="/"><span>NS</span>TRANS</a><p><a href="https://github.com/qwertrewqwertrewq/nstrans" target="_blank" rel="noreferrer">开源项目 ↗</a> · Apache-2.0</p></footer>

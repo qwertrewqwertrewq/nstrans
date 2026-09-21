@@ -149,10 +149,12 @@ Google 官方原始模型仓库是 [`google/translategemma-4b-it`](https://huggi
 
 | 平台 | NSTrans 默认下载/模型 | 来源性质 | 大小参考 | 当前验证情况 |
 |---|---|---|---:|---|
-| macOS | Ollama Library `translategemma:4b`，Q4_K_M | Ollama 官方库包；不是 Google 原始 Safetensors | 约 3.3GB | Apple M4、16GB RAM 运行良好 |
-| Windows | Ollama Library `translategemma:4b`，Q4_K_M | Ollama 官方库包；不是 Google 原始 Safetensors | 约 3.3GB | 三种后端在测试机上均运行良好 |
-| iPadOS | `mradermacher/translategemma-4b-it-GGUF`，IQ4_XS | 社区转换/量化，非 Google 官方发布 | 约 2.4GB | Apple M2、8GB RAM 实测可用，效果尚可 |
-| Android | `Qwe1325/translategemma-4b-it-GGUF`，Q4_K_M | 社区转换/量化，非 Google 官方发布 | 约 2.5GB | 当前默认下载源；受测试设备性能限制，尚未完成实际翻译验证 |
+| macOS | Ollama Library `translategemma:4b`，Q4_K_M | Ollama 官方库包；不是 Google 原始 Safetensors | 3.30GB | Apple M4、16GB RAM 运行良好 |
+| Windows | Ollama Library `translategemma:4b`，Q4_K_M | Ollama 官方库包；不是 Google 原始 Safetensors | 3.30GB | 三种后端在测试机上均运行良好 |
+| iPadOS | `mradermacher/translategemma-4b-it-GGUF`，IQ4_XS | 社区转换/量化，非 Google 官方发布 | 2.28GB | Apple M2、8GB RAM 实测可用，效果尚可 |
+| Android | `Qwe1325/translategemma-4b-it-GGUF`，Q4_K_M | 社区转换/量化，非 Google 官方发布 | 2.49GB | 当前默认下载源；受测试设备性能限制，尚未完成实际翻译验证 |
+
+社区站的[下载页面](https://nstrans.221129.xyz/download)提供上述三个实际模型对象的 Cloudflare R2 镜像，并按 macOS、Windows、iPadOS、Android 分别给出入口；macOS 与 Windows 共用同一个对象，不重复占用存储。下载或使用模型需同意 [Gemma Terms of Use](https://ai.google.dev/gemma/terms)，模型权重不适用本仓库的 Apache-2.0 许可证。
 
 `RemoteOnly` 构建在所有平台均没有默认本地 TranslateGemma，也不会自动下载上述权重；核心翻译模型完全取决于用户配置的远程 API。`WithLlama` 只表示包含本地运行时，不表示安装包内附带模型权重。
 
