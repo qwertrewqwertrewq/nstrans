@@ -215,10 +215,28 @@ async function syncLatestRelease(env) {
   if (missing.length) throw new Error(`最新 Release 缺少下载页资产：${missing.join(', ')}`)
 
   const manifest = { tag: release.tag_name, releaseId: release.id, syncedAt: new Date().toISOString(), assets: {} }
-  const desiredKeys = new Set()
+  const desiredKeys = new Set(Object.values(selected).map((asset) => `${downloadObjectPrefix}${asset.name}`))
+
+  // Model objects consume most of the free R2 allowance. Keeping both the old
+  // and new release installers during a sync can exceed the bucket limit, so
+  // remove release objects that are not part of the incoming release before
+  // uploading anything. The manifest is switched only after every new object
+  // has been stored successfully.
+  let cleanupCursor
+  let deletedObjects = 0
+  do {
+    const page = await env.DOWNLOADS.list({ prefix: downloadObjectPrefix, cursor: cleanupCursor })
+    const stale = page.objects.map((item) => item.key).filter((key) => !desiredKeys.has(key))
+    if (stale.length) {
+      await env.DOWNLOADS.delete(stale)
+      deletedObjects += stale.length
+    }
+    cleanupCursor = page.truncated ? page.cursor : undefined
+  } while (cleanupCursor)
+  if (deletedObjects) console.log(`R2 release pre-cleanup removed ${deletedObjects} stale objects`)
+
   for (const [key, asset] of Object.entries(selected)) {
     const objectKey = `${downloadObjectPrefix}${asset.name}`
-    desiredKeys.add(objectKey)
     const existing = await env.DOWNLOADS.head(objectKey)
     if (!existing || existing.customMetadata?.githubAssetId !== String(asset.id) || existing.size !== asset.size) {
       const assetUrl = new URL(asset.browser_download_url)
@@ -234,13 +252,6 @@ async function syncLatestRelease(env) {
   }
 
   await env.DOWNLOADS.put(downloadManifestKey, JSON.stringify(manifest), { httpMetadata: { contentType: 'application/json; charset=utf-8', cacheControl: 'no-store' } })
-  let cursor
-  do {
-    const page = await env.DOWNLOADS.list({ prefix: downloadObjectPrefix, cursor })
-    const stale = page.objects.map((item) => item.key).filter((key) => !desiredKeys.has(key))
-    if (stale.length) await env.DOWNLOADS.delete(stale)
-    cursor = page.truncated ? page.cursor : undefined
-  } while (cursor)
   console.log(`R2 release mirror synced: ${manifest.tag}, ${Object.keys(manifest.assets).length} assets`)
   return { ok: true, tag: manifest.tag, assets: Object.keys(manifest.assets).length }
 }
