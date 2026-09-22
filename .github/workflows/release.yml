@@ -210,6 +210,42 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
 
+  android-tv:
+    name: Android TV · Subtitle client
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || env.RELEASE_TAG }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build and stage TV APK
+        working-directory: androidscreenclient
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+          tv_version=$(sed -n 's/^[[:space:]]*versionName "\([^"]*\)"/\1/p' app/build.gradle)
+          [[ -n "$tv_version" ]] || { echo "Unable to resolve TV versionName." >&2; exit 1; }
+          mkdir -p release-assets
+          cp app/build/outputs/apk/debug/app-debug.apk "release-assets/NSTrans-TV-$tv_version-Android-debug.apk"
+          cd release-assets
+          sha256sum *.apk > "NSTrans-TV-$tv_version-Android-debug.apk.sha256"
+
+      - name: Upload Android TV asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" androidscreenclient/release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+
   windows:
     name: Windows · WithLlama + RemoteOnly
     needs: prepare

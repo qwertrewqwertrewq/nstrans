@@ -100,6 +100,8 @@ jobs:
             "NSTrans-$version-Windows-x64-WithLlama-setup.exe"
           stage NSTrans-Windows-x64-RemoteOnly-setup.exe \
             "NSTrans-$version-Windows-x64-RemoteOnly-setup.exe"
+          stage NSTrans-TV-0.2.4-Android-debug.apk \
+            "NSTrans-TV-0.2.4-Android-debug.apk"
 
           find release-assets -maxdepth 1 -type f -print | sort
 
