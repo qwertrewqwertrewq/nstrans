@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Activity, Camera, Cast, ChevronDown, Expand, Gauge, KeyRound, Languages, LayoutGrid, LoaderCircle, Maximize, Pause, Play, RefreshCw, RotateCcw, ScanText, Settings2, Sparkles, Unplug, Video, Wifi } from 'lucide-react'
 import './App.css'
 import { DialogueStabilizer } from './services/dialogueStabilizer'
+import { RecursiveTranslationReuse } from './services/recursiveTranslationReuse'
 import { disposeOcr, fitCaptureSize, recognizeJapanese, type OcrProgress } from './services/ocr'
 import { TranslationRouter, defaultRoutingSettings, type TerminologyItem } from './services/translationRouter'
-import { getTranslateGemmaBackend, installTranslateGemma, installTranslateGemmaFromUrl, pickAndImportTranslateGemmaFile, setTranslateGemmaBackend, translationRuntimes, translationRuntimeStatus, unloadTranslateGemma, type LlamaBackend, type ModelDownloadProgress } from './services/translationRuntime'
+import { getTranslateGemmaBackend, installTranslateGemma, installTranslateGemmaFromUrl, pickAndImportTranslateGemmaFile, prepareNllb, setTranslateGemmaBackend, translationRuntimes, translationRuntimeStatus, unloadTranslateGemma, type LlamaBackend, type ModelDownloadProgress } from './services/translationRuntime'
 import { ConfigurableEntityLookup, EntityLearningQueue } from './services/entityLookup'
 import { browserTranslationMemory } from './services/translationMemory'
 import { browserDictionaryPacks, HttpDictionaryDistributionProvider } from './services/dictionaryPacks'
@@ -15,7 +16,7 @@ import type { GameId } from './gameAdapters/types'
 import { PresentationToolbar } from './components/PresentationToolbar'
 import { SelectionOverlay } from './components/SelectionOverlay'
 import { offsetTextRegions, selectionCanvasRect, type NormalizedSelection } from './services/presentationGeometry'
-import type { LatencySample, OcrSettings, OverlaySettings, TextRegion, TranslationEngineId, TranslationRoutingSettings } from './types'
+import type { LatencySample, MachineTranslationProvider, OcrSettings, OverlaySettings, TextRegion, TranslationEngineId, TranslationRoutingSettings } from './types'
 import { DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, entitySearchEngineLabels, loadEntitySearchSettings, remoteModelCredentials, resolveSearchKeywords, saveEntitySearchSettings, type EntitySearchEngineId } from './services/entitySearchSettings'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -142,7 +143,7 @@ function App() {
   const nativeFullscreenOwnedRef = useRef(false)
   const stabilizerRef = useRef(new DialogueStabilizer())
   const marqueeLocksRef = useRef(new TranslationMarqueeLocks())
-  const trackedTranslationsRef = useRef(new Map<string, { source: string; text: string; engine: TranslationEngineId }>())
+  const trackedTranslationsRef = useRef(new RecursiveTranslationReuse<{ text: string; engine: TranslationEngineId }>())
   const translationRetryRef = useRef(new Map<string, { source: string; retryAt: number }>())
   const translationBusyRef = useRef(false)
   const translationEpochRef = useRef(0)
@@ -192,10 +193,22 @@ function App() {
   const routerRef = useRef(knowledgeServices.router)
   const [routing, setRouting] = useState<TranslationRoutingSettings>(() => ({
     ...defaultRoutingSettings,
-    ...(() => { try { const saved = JSON.parse(localStorage.getItem(routingModeStorageKey) ?? '{}'); return { translationStrategy: saved.translationStrategy === 'direct' ? 'direct' : 'knowledge-assisted', coreTranslationEngine: !localRuntimeBundled || saved.coreTranslationEngine === 'remote' ? 'remote' : 'local' } } catch { return { coreTranslationEngine: localRuntimeBundled ? 'local' as const : 'remote' as const } } })(),
+    ...(() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem(routingModeStorageKey) ?? '{}') as Partial<TranslationRoutingSettings>
+        const coreTranslationEngine = saved.coreTranslationEngine === 'machine'
+          ? 'machine' as const
+          : !localRuntimeBundled || saved.coreTranslationEngine === 'remote' ? 'remote' as const : 'local' as const
+        const savedProvider = saved.machineTranslationProvider
+        const machineTranslationProvider: MachineTranslationProvider = savedProvider === 'google-web' || savedProvider === 'youdao-web' || savedProvider === 'bing-web' || savedProvider === 'deepl-web' || (localRuntimeBundled && savedProvider === 'nllb-600m')
+          ? savedProvider
+          : 'youdao-web'
+        return { translationStrategy: saved.translationStrategy === 'direct' ? 'direct' as const : 'knowledge-assisted' as const, coreTranslationEngine, machineTranslationProvider }
+      } catch { return { coreTranslationEngine: localRuntimeBundled ? 'local' as const : 'remote' as const, machineTranslationProvider: 'youdao-web' as const } }
+    })(),
     entitySearch: loadEntitySearchSettings(),
   }))
-  const [runtimeStatus, setRuntimeStatus] = useState<Record<TranslationEngineId, boolean>>({ translategemma: false, 'remote-llm': true })
+  const [runtimeStatus, setRuntimeStatus] = useState<Record<TranslationEngineId, boolean>>({ translategemma: false, 'remote-llm': true, 'nllb-600m': localRuntimeBundled, 'web-machine': true })
   const [llamaBackend, setLlamaBackend] = useState<LlamaBackend>('cpu')
   const [knowledgeStats, setKnowledgeStats] = useState({
     translations: 0,
@@ -214,6 +227,8 @@ function App() {
   const [modelUrl, setModelUrl] = useState('')
   const [modelStatusMessage, setModelStatusMessage] = useState('')
   const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null)
+  const [nllbPreparing, setNllbPreparing] = useState(false)
+  const [nllbStatus, setNllbStatus] = useState('首次使用时下载并缓存量化 ONNX 模型')
   // Mobile CPUs need a short idle window between ONNX passes so preview and
   // llama.cpp remain responsive. Desktop keeps the lower-latency default.
   const [ocr, setOcr] = useState<OcrSettings>(() => {
@@ -695,9 +710,21 @@ function App() {
         const lockTime = performance.now()
         marqueeLocksRef.current.prune(lockTime)
         const activeIds = new Set(observation.visible.map(({ id }) => id))
-        for (const id of trackedTranslationsRef.current.keys()) if (!activeIds.has(id)) trackedTranslationsRef.current.delete(id)
         for (const id of translationRetryRef.current.keys()) if (!activeIds.has(id)) translationRetryRef.current.delete(id)
+        const reusedTranslations = new Map<string, { text: string; engine: TranslationEngineId }>()
+        const readyKeys = new Set(observation.ready.map((region) => `${region.id}\u0000${region.source}`))
+        for (const region of observation.visible) {
+          const reused = trackedTranslationsRef.current.resolve(region.source)
+          if (!reused) continue
+          reusedTranslations.set(region.id, reused.value)
+          if (readyKeys.has(`${region.id}\u0000${region.source}`)) {
+            stabilizerRef.current.commit(region.id, region.source)
+            translationRetryRef.current.delete(region.id)
+            if (reused.recursiveAlias) writeDiagnosticLog('LLM', '近似文本复用译文', `${region.source} · 差异 ${(reused.differenceRatio * 100).toFixed(1)}% · 未发送翻译请求`, 'success', 1_000)
+          }
+        }
         const ready = observation.ready.filter((region) => {
+          if (reusedTranslations.has(region.id)) return false
           if (marqueeLocksRef.current.find(region, lockTime)) return false
           const retry = translationRetryRef.current.get(region.id)
           return !retry || retry.source !== region.source || retry.retryAt <= lockTime
@@ -716,13 +743,13 @@ function App() {
                 translationSource: lock.source,
                 marqueeDurationMs: lock.durationMs,
               }
-            const saved = trackedTranslationsRef.current.get(region.id)
-            return saved?.source === region.source
+            const saved = reusedTranslations.get(region.id)
+            return saved
               ? {
                   ...region,
                   translated: saved.text,
                   translationEngine: saved.engine,
-                  translationSource: saved.source,
+                  translationSource: region.source,
                 }
               : region
           }),
@@ -747,21 +774,24 @@ function App() {
                 return
               }
               ready.forEach((region, index) => {
-                if (!stabilizerRef.current.isCurrent(region.id, region.source)) return
                 const result = translations[index]
                 if (!result?.text) {
-                  translationRetryRef.current.set(region.id, {
-                    source: region.source,
-                    retryAt: performance.now() + 5_000,
-                  })
+                  if (stabilizerRef.current.isCurrent(region.id, region.source))
+                    translationRetryRef.current.set(region.id, {
+                      source: region.source,
+                      retryAt: performance.now() + 5_000,
+                    })
                   return
                 }
-                translationRetryRef.current.delete(region.id)
-                trackedTranslationsRef.current.set(region.id, {
-                  source: region.source,
+                // Keep a successful result even if OCR has already advanced to a
+                // slightly different string. It becomes the anchor of the reuse
+                // family, so the current text can inherit it on the next render.
+                trackedTranslationsRef.current.remember(region.source, {
                   text: result.text,
                   engine: result.engine ?? 'translategemma',
                 })
+                if (!stabilizerRef.current.isCurrent(region.id, region.source)) return
+                translationRetryRef.current.delete(region.id)
                 const layout = translationOverlayLayout(region.source, result.text, region.box.x1 - region.box.x0, region.box.y1 - region.box.y0, overlay.fontScale)
                 marqueeLocksRef.current.start(region, result.text, result.engine ?? 'translategemma', performance.now(), layout.scrolling)
                 stabilizerRef.current.commit(region.id, region.source)
@@ -778,13 +808,13 @@ function App() {
                       translationSource: lock.source,
                       marqueeDurationMs: lock.durationMs,
                     }
-                  const saved = trackedTranslationsRef.current.get(region.id)
-                  return saved?.source === region.source
+                  const saved = trackedTranslationsRef.current.resolve(region.source)?.value
+                  return saved
                     ? {
                         ...region,
                         translated: saved.text,
                         translationEngine: saved.engine,
-                        translationSource: saved.source,
+                        translationSource: region.source,
                       }
                     : region
                 }),
@@ -821,13 +851,13 @@ function App() {
               translationSource: lock.source,
               marqueeDurationMs: lock.durationMs,
             }
-          const saved = trackedTranslationsRef.current.get(region.id)
-          return saved?.source === region.source
+          const saved = reusedTranslations.get(region.id)
+          return saved
             ? {
                 ...region,
                 translated: saved.text,
                 translationEngine: saved.engine,
-                translationSource: saved.source,
+                translationSource: region.source,
               }
             : region
         })
@@ -1062,12 +1092,31 @@ function App() {
       saveEntitySearchSettings(entitySearch)
       return { ...current, entitySearch }
     })
-  const updateRoutingMode = (patch: Partial<Pick<TranslationRoutingSettings, 'translationStrategy' | 'coreTranslationEngine'>>) => setRouting((current) => {
+  const updateRoutingMode = (patch: Partial<Pick<TranslationRoutingSettings, 'translationStrategy' | 'coreTranslationEngine' | 'machineTranslationProvider'>>) => setRouting((current) => {
     const next = { ...current, ...patch }
     routerRef.current.resetContext(); setContextTurns(0)
-    try { localStorage.setItem(routingModeStorageKey, JSON.stringify({ translationStrategy: next.translationStrategy, coreTranslationEngine: next.coreTranslationEngine })) } catch { /* Session selection remains active. */ }
+    try { localStorage.setItem(routingModeStorageKey, JSON.stringify({ translationStrategy: next.translationStrategy, coreTranslationEngine: next.coreTranslationEngine, machineTranslationProvider: next.machineTranslationProvider })) } catch { /* Session selection remains active. */ }
     return next
   })
+  const downloadNllb = async () => {
+    setNllbPreparing(true)
+    setNllbStatus('正在初始化 NLLB-600M…')
+    try {
+      await prepareNllb((item) => {
+        const percent = typeof item.progress === 'number' ? ` · ${item.progress.toFixed(1)}%` : ''
+        const action = item.status === 'downloading' || item.status === 'progress' ? '正在下载'
+          : item.status === 'validating' ? '正在校验'
+            : item.status === 'extracting' ? '正在安装'
+              : '正在加载'
+        setNllbStatus(`${action} ${item.file ?? '模型'}${percent}`)
+      })
+      setNllbStatus('NLLB-600M 已就绪，模型已写入本机缓存')
+    } catch (reason) {
+      setNllbStatus(errorMessage(reason, 'NLLB-600M 初始化失败'))
+    } finally {
+      setNllbPreparing(false)
+    }
+  }
   const saveApiKeyAndUpload = async () => {
     const key = communityApiKey.trim()
     saveCommunityApiKey(key)
@@ -1548,13 +1597,14 @@ function App() {
               <label>翻译方式</label>
               <div className="segmented">
                 <button className={routing.translationStrategy === 'knowledge-assisted' ? 'active' : ''} onClick={() => updateRoutingMode({ translationStrategy: 'knowledge-assisted' })}>词库、缓存与学习辅助</button>
-                <button className={routing.translationStrategy === 'direct' ? 'active' : ''} onClick={() => updateRoutingMode({ translationStrategy: 'direct' })}>OCR 原文直送 LLM</button>
+                <button className={routing.translationStrategy === 'direct' ? 'active' : ''} onClick={() => updateRoutingMode({ translationStrategy: 'direct' })}>OCR 原文直送核心翻译</button>
               </div>
               <div className="notice">{routing.translationStrategy === 'knowledge-assisted' ? '先匹配远程词库与本地缓存，后台搜索并学习术语，再把原文、上下文和术语提示交给核心模型。' : 'OCR 文字直接交给核心模型；不读取翻译词库/缓存，不自动搜索、不学习入库。远程视觉识别仍可单独启用。'}</div>
               <label>核心翻译模型</label>
               <div className="segmented">
                 {localRuntimeBundled && <button className={routing.coreTranslationEngine === 'local' ? 'active' : ''} onClick={() => updateRoutingMode({ coreTranslationEngine: 'local' })}>本机 TranslateGemma</button>}
                 <button className={routing.coreTranslationEngine === 'remote' ? 'active' : ''} onClick={() => updateRoutingMode({ coreTranslationEngine: 'remote' })}>远程 LLM</button>
+                <button className={routing.coreTranslationEngine === 'machine' ? 'active' : ''} onClick={() => updateRoutingMode({ coreTranslationEngine: 'machine' })}>机器翻译</button>
               </div>
               {routing.coreTranslationEngine === 'remote' && (
                 <div className="remote-core-model">
@@ -1574,6 +1624,36 @@ function App() {
                     </div>
                   </div>
                   <div className="engine-status"><EngineState label={`远程 LLM · ${remoteModelCredentials(routing.entitySearch, 'core')?.name ?? '未选择模型'}`} ready={Boolean(remoteModelCredentials(routing.entitySearch, 'core')?.apiKey)} /></div>
+                </div>
+              )}
+              {routing.coreTranslationEngine === 'machine' && (
+                <div className="remote-core-model">
+                  <div className="inline-select">
+                    <label>机器翻译服务</label>
+                    <div className="select-wrap">
+                      <select value={routing.machineTranslationProvider} onChange={(event) => updateRoutingMode({ machineTranslationProvider: event.target.value as MachineTranslationProvider })}>
+                        {localRuntimeBundled && <option value="nllb-600m">本机 NLLB-200 Distilled 600M</option>}
+                        <option value="youdao-web">网易有道网页机翻 · 无需 API Key</option>
+                        <option value="google-web">Google 网页机翻 · 无需 API Key</option>
+                        <option value="bing-web">Bing 网页机翻 · 无需 API Key</option>
+                        <option value="deepl-web">DeepL 网页机翻 · 无需 API Key</option>
+                      </select>
+                      <ChevronDown size={13} />
+                    </div>
+                  </div>
+                  {routing.machineTranslationProvider === 'nllb-600m' ? (
+                    <div className="model-manager">
+                      <div className="engine-status"><EngineState label="NLLB-600M · Transformers.js · ONNX/WASM" ready={runtimeStatus['nllb-600m']} /></div>
+                      <button className="scan-button" disabled={nllbPreparing} onClick={() => void downloadNllb()}>
+                        {nllbPreparing ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}
+                        下载 / 校验 NLLB 模型
+                      </button>
+                      <small className="muted">{nllbStatus}</small>
+                      <small className="muted">模型按需下载并缓存在设备中，不打入安装包；NLLB 模型许可为 CC BY-NC 4.0。</small>
+                    </div>
+                  ) : (
+                    <div className="notice">通过公开翻译网页获取译文，不需要 API Key；网页结构、访问频率限制或地区网络可能影响可用性。</div>
+                  )}
                 </div>
               )}
               <div className="inline-select">
@@ -1808,7 +1888,7 @@ function App() {
                 翻译记忆 {knowledgeStats.translations} 条 · 自动术语 {knowledgeStats.learnedTerms} 条 · 待确认 {knowledgeStats.pendingTerms} 条 · 待共享 {sharingPending} 条
               </div>
               {communityStatus && <small className="muted">{communityStatus}</small>}
-              <div className="notice">{routing.translationStrategy === 'direct' ? `当前直接将 OCR 原文交给${routing.coreTranslationEngine === 'remote' ? '远程 LLM' : '本机 TranslateGemma'}，不读取或写入翻译记忆。` : `远程词库包优先；未命中新文本由${routing.coreTranslationEngine === 'remote' ? '远程 LLM' : '本机 TranslateGemma'}翻译并记忆，专名检索在后台进行。`}</div>
+              <div className="notice">{routing.translationStrategy === 'direct' ? `当前直接将 OCR 原文交给${routing.coreTranslationEngine === 'remote' ? '远程 LLM' : routing.coreTranslationEngine === 'machine' ? '机器翻译' : '本机 TranslateGemma'}，不读取或写入翻译记忆。` : `远程词库包优先；未命中新文本由${routing.coreTranslationEngine === 'remote' ? '远程 LLM' : routing.coreTranslationEngine === 'machine' ? '机器翻译' : '本机 TranslateGemma'}翻译并记忆，专名检索在后台进行。`}</div>
             </ControlPanel>
           )}
           {visiblePanels.has('remote') && (

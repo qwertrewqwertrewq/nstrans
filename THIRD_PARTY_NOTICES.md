@@ -9,12 +9,14 @@ NSTrans 自有源码采用 Apache License 2.0。以下项目、运行时和模�
 | llama.cpp / llama-cpp-2 | Android、iPadOS 与桌面 GGUF 推理 | MIT | https://github.com/ggml-org/llama.cpp |
 | Ollama CLI/runtime | Windows 与部分桌面模型运行时 | MIT；仅指开源仓库中的 CLI/runtime 代码 | https://github.com/ollama/ollama |
 | TranslateGemma | 日文到中文翻译模型 | Gemma Terms of Use；不是 Apache-2.0 或 MIT | https://huggingface.co/google/translategemma-4b-it |
+| Transformers.js | 浏览器/WebView ONNX 模型运行时 | Apache-2.0 | https://github.com/huggingface/transformers.js |
+| NLLB-200 Distilled 600M / Xenova ONNX conversion | 本机通用机器翻译 | CC BY-NC 4.0；不是 Apache-2.0，限制商业使用 | https://huggingface.co/Xenova/nllb-200-distilled-600M |
 | Tauri | 跨平台应用壳层 | Apache-2.0 OR MIT | https://github.com/tauri-apps/tauri |
 | React / React DOM | 客户端界面 | MIT | https://github.com/facebook/react |
 | Tesseract.js | 浏览器开发回退与历史兼容代码 | Apache-2.0 | https://github.com/naptha/tesseract.js |
 | Lucide | 界面图标 | ISC | https://github.com/lucide-icons/lucide |
 | Wikimedia APIs | 公开专有名词检索来源 | 各页面内容适用 Wikimedia 标注的许可与归属要求 | https://www.mediawiki.org/wiki/API:Main_page |
 
-TranslateGemma 模型权重不属于 NSTrans 源码。用户下载、导入和使用模型前应阅读并接受 Google Gemma 使用条款。游戏名称、商标、画面、文本与其他资产属于各自权利人；NSTrans 未主张其所有权。
+TranslateGemma 与 NLLB 模型权重不属于 NSTrans 源码。用户下载、导入和使用模型前应阅读并接受各自模型条款；尤其 NLLB 权重的 CC BY-NC 4.0 并不授予商业使用权。游戏名称、商标、画面、文本与其他资产属于各自权利人；NSTrans 未主张其所有权。
 
 JavaScript、Rust、Python、Gradle 和平台 SDK 的传递依赖还包含各自的许可证文本。重新发行二进制文件时，应保留构建产物随附的许可证与通知，并以锁文件中的实际版本为准。

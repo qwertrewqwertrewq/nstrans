@@ -43,6 +43,12 @@ const modelAssets = Object.freeze({
     sha256: '526747309109c016db547c6fc1c7b0c9c286b5e7a7556827b5419fd9543a09cd',
     source: 'https://huggingface.co/Qwe1325/translategemma-4b-it-GGUF/resolve/main/translategemma-4b-it-q4_k_m.gguf',
   },
+  nllb: {
+    filename: 'nstrans-nllb-200-distilled-600M-q8-v1.zip',
+    size: 916828255,
+    sha256: 'bd9a15c30464b41406fd69c5ea1df67dd02bac9631178ba12527533832e4b1f6',
+    source: 'https://huggingface.co/Xenova/nllb-200-distilled-600M/tree/261c31d1a5732c67cdd16d80e8d6088507c7ccea',
+  },
 })
 
 export default {
@@ -107,7 +113,7 @@ async function downloadModel(request, platform) {
 }
 
 function modelNotice() {
-  return new Response('Gemma is provided under and subject to the Gemma Terms of Use found at https://ai.google.dev/gemma/terms\n', {
+  return new Response('TranslateGemma is provided under and subject to the Gemma Terms of Use found at https://ai.google.dev/gemma/terms\nNLLB-200 Distilled 600M and its compatible ONNX conversion are provided under CC BY-NC 4.0.\n', {
     headers: {
       'content-type': 'text/plain; charset=utf-8',
       'content-disposition': 'attachment; filename="NOTICE.txt"',

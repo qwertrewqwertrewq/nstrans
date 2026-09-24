@@ -26,6 +26,7 @@ export const defaultRoutingSettings: TranslationRoutingSettings = {
   gameId: 'zelda-totk',
   translationStrategy: 'knowledge-assisted',
   coreTranslationEngine: 'local',
+  machineTranslationProvider: 'youdao-web',
   contextResetSeconds: 45,
   contextMaxTurns: 8,
   entityLookupEnabled: true,
@@ -196,7 +197,11 @@ export class TranslationRouter {
     const hasContextualInput = requests.some((request) => !isLikelyStandaloneLabel(request.text))
     if (hasContextualInput && this.lastLongTextAt && now - this.lastLongTextAt > settings.contextResetSeconds * 1000) this.resetContext()
     const useKnowledge = settings.translationStrategy !== 'direct'
-    const runtimeId: TranslationEngineId = settings.coreTranslationEngine === 'remote' ? 'remote-llm' : 'translategemma'
+    const runtimeId: TranslationEngineId = settings.coreTranslationEngine === 'remote'
+      ? 'remote-llm'
+      : settings.coreTranslationEngine === 'machine'
+        ? settings.machineTranslationProvider === 'nllb-600m' ? 'nllb-600m' : 'web-machine'
+        : 'translategemma'
     const profile = getGameProfile(settings.gameId)
     const searchKeywords = resolveSearchKeywords(settings.entitySearch, profile.searchNames)
     requests.forEach((request, index) => {
@@ -216,7 +221,7 @@ export class TranslationRouter {
         writeDiagnosticLog('词库', '直接命中', matched.join('；'), 'success', 1_000)
         output[index] = {
           text: glossaryEntry.target,
-          engine: 'translategemma',
+          engine: runtimeId,
         }
         return
       }
@@ -324,7 +329,7 @@ export class TranslationRouter {
     unresolved.forEach(({ index, request }) => {
       if (output[index]) return
       const remembered = useKnowledge ? this.memory.lookup(settings.gameId, request.sourceLanguage, request.targetLanguage, request.text) : undefined
-      if (remembered && validateTranslation(request.text, remembered, request.targetLanguage).valid) output[index] = { text: remembered, engine: 'translategemma' }
+      if (remembered && validateTranslation(request.text, remembered, request.targetLanguage).valid) output[index] = { text: remembered, engine: runtimeId }
       else pending.push({ index, request })
     })
 
@@ -348,14 +353,25 @@ export class TranslationRouter {
       if (runtimeId === 'remote-llm' && !remoteModel?.apiKey) throw new Error('请在“翻译与词库”选择远程核心模型，并在“密钥与远程管理”配置 API Key')
       const runtime = this.runtimes[runtimeId]
       if (!runtime) throw new Error(`翻译运行时不可用：${runtimeId}`)
+      const machineTranslation = runtimeId === 'nllb-600m' || runtimeId === 'web-machine'
+      const protectedRequests = pending.map(({ request }) => machineTranslation
+        ? {
+            ...request,
+            text: glossary
+              .filter((entry) => request.text.includes(entry.source))
+              .sort((a, b) => b.source.length - a.source.length)
+              .reduce((text, entry) => text.replaceAll(entry.source, entry.target), request.text),
+          }
+        : request)
       const translations = await runtime.translateMany({
-        requests: pending.map(({ request }) => request),
+        requests: protectedRequests,
         history,
         glossary,
         research,
         remoteModel,
         gameNames: searchKeywords,
         translationInstruction: settings.entitySearch.translationInstruction,
+        machineProvider: settings.machineTranslationProvider,
       })
       pending.forEach(({ request }, position) => {
         translations[position] = enforceMatchedGlossary(request.text, translations[position] ?? '', glossary)
@@ -366,7 +382,7 @@ export class TranslationRouter {
       })
       if (invalid.length) {
         const repaired = await runtime.translateMany({
-          requests: invalid.map(({ request }) => request),
+          requests: invalid.map(({ position }) => protectedRequests[position]),
           history,
           glossary,
           research,
@@ -374,6 +390,7 @@ export class TranslationRouter {
           remoteModel,
           gameNames: searchKeywords,
           translationInstruction: settings.entitySearch.translationInstruction,
+          machineProvider: settings.machineTranslationProvider,
         })
         invalid.forEach(({ position, request }, repairPosition) => {
           const candidate = enforceMatchedGlossary(request.text, repaired[repairPosition] ?? '', glossary)

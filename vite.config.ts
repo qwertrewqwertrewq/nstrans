@@ -69,6 +69,87 @@ function readBody(request: import('node:http').IncomingMessage): Promise<string>
   })
 }
 
+async function runMachineTranslationPage(raw: string) {
+  const body = JSON.parse(raw) as { provider?: string; text?: string; sourceLanguage?: string; targetLanguage?: string }
+  const text = body.text?.trim() ?? ''
+  if (!text || [...text].length > 2_000) throw new Error('网页机翻原文为空或超过 2000 字符')
+  const source = /^(ja|jpn)/iu.test(body.sourceLanguage ?? '') ? 'ja' : 'auto'
+  const target = /^(zh|zho)/iu.test(body.targetLanguage ?? '') ? 'zh-CN' : 'zh-CN'
+  if (body.provider === 'deepl-web') return runDeepLWebTranslation(text, source)
+  if (body.provider === 'bing-web') return runBingWebTranslation(text, source)
+  if (body.provider === 'google-web') {
+    const url = new URL('https://translate.googleapis.com/translate_a/single')
+    Object.entries({ client: 'gtx', sl: source, tl: target, dt: 't', q: text }).forEach(([key, value]) => url.searchParams.set(key, value))
+    const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 13; NSTrans) AppleWebKit/537.36 Mobile Safari/537.36' }, signal: AbortSignal.timeout(15_000) })
+    if (!response.ok) throw new Error(`Google 网页机翻返回 HTTP ${response.status}`)
+    const payload = await response.json() as Array<Array<Array<string>>>
+    const translation = payload[0]?.map((row) => row[0] ?? '').join('')
+    if (!translation) throw new Error('Google 未返回译文')
+    return JSON.stringify({ translation })
+  }
+  const url = new URL('https://m.youdao.com/translate')
+  if (body.provider === 'youdao-web') {
+    url.searchParams.set('inputtext', text)
+    url.searchParams.set('type', source === 'ja' ? 'JA2ZH_CN' : 'AUTO')
+  } else throw new Error('不支持的网页机翻服务')
+  const response = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 13; NSTrans) AppleWebKit/537.36 Mobile Safari/537.36' }, signal: AbortSignal.timeout(15_000) })
+  if (!response.ok) throw new Error(`网页机翻返回 HTTP ${response.status}`)
+  return await response.text()
+}
+
+const pageValue = (text: string, prefix: string, suffix: string) => {
+  const start = text.indexOf(prefix)
+  if (start < 0) return undefined
+  const rest = text.slice(start + prefix.length)
+  const end = rest.indexOf(suffix)
+  return end < 0 ? undefined : rest.slice(0, end)
+}
+
+async function runBingWebTranslation(text: string, source: string) {
+  const page = await fetch('https://www.bing.com/translator', { headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 13; NSTrans) AppleWebKit/537.36 Mobile Safari/537.36' }, signal: AbortSignal.timeout(15_000) })
+  if (!page.ok) throw new Error(`Bing 页面返回 HTTP ${page.status}`)
+  const base = new URL(page.url).origin
+  const cookies = page.headers.get('set-cookie')?.split(/,(?=[^;,]+=)/u).map((value) => value.split(';')[0]).join('; ') ?? ''
+  const html = await page.text()
+  const ig = pageValue(html, 'IG:"', '"') ?? pageValue(html, '"ig":"', '"')
+  const helper = pageValue(html, 'params_AbusePreventionHelper = [', ']')
+  if (!ig || !helper) throw new Error('Bing 页面未返回临时凭据')
+  const [key, rawToken] = helper.split(',', 3)
+  const token = rawToken?.trim().replace(/^"|"$/gu, '')
+  const iid = pageValue(html, 'id="rich_tta" data-iid="', '"') ?? 'translator.5023'
+  if (!key || !token) throw new Error('Bing 临时凭据不完整')
+  const params = new URLSearchParams({ fromLang: source === 'ja' ? 'ja' : 'auto-detect', to: 'zh-Hans', text, token, key: key.trim() })
+  const response = await fetch(`${base}/ttranslatev3?isVertical=1&IG=${encodeURIComponent(ig)}&IID=${encodeURIComponent(iid)}`, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: base, referer: `${base}/translator`, ...(cookies ? { cookie: cookies } : {}) }, body: params, signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) throw new Error(response.status === 401 ? 'Bing 要求进行网页验证，请稍后重试或切换服务' : `Bing 返回 HTTP ${response.status}`)
+  const payload = await response.json() as Array<{ translations?: Array<{ text?: string }> }>
+  const translation = payload[0]?.translations?.[0]?.text
+  if (!translation) throw new Error('Bing 未返回译文')
+  return JSON.stringify({ translation })
+}
+
+async function deepLRpc(method: string, params: unknown) {
+  const payload = { jsonrpc: '2.0', method, params, id: Math.floor(Math.random() * 1_000_000) }
+  const body = JSON.stringify(payload).replace(`"method":"${method}"`, `"method": "${method}"`)
+  const response = await fetch(`https://www2.deepl.com/jsonrpc?client=chrome-extension,1.28.0&method=${method}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'DeepLBrowserExtension/1.28.0 Mozilla/5.0', authorization: 'None', origin: 'chrome-extension://cofdbpoegempjloogbagkncekinflcnj', referer: 'https://www.deepl.com/' }, body, signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) throw new Error(response.status === 429 ? 'DeepL 请求过于频繁，请稍后重试' : `DeepL 返回 HTTP ${response.status}`)
+  return response.json() as Promise<Record<string, any>>
+}
+
+async function runDeepLWebTranslation(text: string, source: string) {
+  const split = await deepLRpc('LMT_split_text', { commonJobParams: { mode: 'translate' }, lang: { lang_user_selected: source === 'ja' ? 'ja' : 'auto' }, texts: [text], textType: 'plaintext' })
+  const chunks = split.result?.texts?.[0]?.chunks as Array<{ sentences: Array<{ prefix: string; text: string }> }> | undefined
+  if (!chunks?.length) throw new Error('DeepL 未能拆分原文')
+  const jobs = chunks.map((chunk, index) => ({ kind: 'default', preferred_num_beams: 4, raw_en_context_before: index ? [chunks[index - 1].sentences[0].text] : [], raw_en_context_after: index + 1 < chunks.length ? [chunks[index + 1].sentences[0].text] : [], sentences: [{ prefix: chunk.sentences[0].prefix, text: chunk.sentences[0].text, id: index + 1 }] }))
+  const translated = await deepLRpc('LMT_handle_jobs', { commonJobParams: { mode: 'translate' }, lang: { source_lang_computed: split.result?.lang?.detected ?? 'JA', target_lang: 'ZH' }, jobs, priority: 1, timestamp: Date.now() })
+  const translation = (translated.result?.translations as Array<{ beams?: Array<{ sentences?: Array<{ text?: string }> }> }> | undefined)?.map((item) => item.beams?.[0]?.sentences?.[0]?.text ?? '').join('')
+  if (!translation) throw new Error('DeepL 未返回译文')
+  return JSON.stringify({ translation })
+}
+
 async function ollamaAvailable() {
   try {
     const response = await fetch('http://127.0.0.1:11434/api/tags')
@@ -473,6 +554,24 @@ function macTranslationPlugin(): Plugin {
                 error: error instanceof Error ? error.message : '搜索服务不可用',
               }),
             )
+          })
+      })
+      server.middlewares.use('/api/machine-translation-page', (request, response, next) => {
+        if (request.method !== 'POST') {
+          next()
+          return
+        }
+        void readBody(request)
+          .then(runMachineTranslationPage)
+          .then((html) => {
+            response.statusCode = 200
+            response.setHeader('Content-Type', 'application/json; charset=utf-8')
+            response.end(JSON.stringify({ html }))
+          })
+          .catch((error: unknown) => {
+            response.statusCode = 502
+            response.setHeader('Content-Type', 'application/json; charset=utf-8')
+            response.end(JSON.stringify({ error: error instanceof Error ? error.message : '网页机翻服务不可用' }))
           })
       })
       server.middlewares.use('/api/qwen-flash', (request, response, next) => {

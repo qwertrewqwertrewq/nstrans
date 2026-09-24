@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio}, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{io::{BufRead, BufReader, Read, Write}, process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio}, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State};
 
 mod tv_cast;
+mod nllb;
 
 #[cfg(target_os = "android")]
 mod android_runtime;
@@ -613,6 +614,114 @@ async fn entity_web_search(engine: String, query: String, api_key: String) -> Re
   Err("不支持的搜索引擎".into())
 }
 
+#[tauri::command]
+async fn machine_translation_page(provider: String, text: String, source_language: String, target_language: String) -> Result<String, String> {
+  let text = text.trim();
+  if text.is_empty() { return Err("机翻原文为空".into()); }
+  if text.chars().count() > 2_000 { return Err("单次网页机翻最多支持 2000 字符".into()); }
+  let source = if source_language.starts_with("ja") || source_language.starts_with("jpn") { "ja" } else { "auto" };
+  let target = if target_language.starts_with("zh") || target_language.starts_with("zho") { "zh-CN" } else { "zh-CN" };
+  let client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(15))
+    .user_agent("Mozilla/5.0 (Linux; Android 13; NSTrans) AppleWebKit/537.36 Mobile Safari/537.36")
+    .build().map_err(|error| error.to_string())?;
+  if provider == "deepl-web" {
+    return deepl_web_translation(&client, text, source, target).await;
+  }
+  if provider == "bing-web" {
+    return bing_web_translation(&client, text, source).await;
+  }
+  if provider == "google-web" {
+    let response = client.get("https://translate.googleapis.com/translate_a/single").query(&[("client", "gtx"), ("sl", source), ("tl", target), ("dt", "t"), ("q", text)]).send().await.map_err(|error| format!("Google 翻译请求失败：{error}"))?;
+    let status = response.status();
+    if !status.is_success() { return Err(format!("Google 网页机翻返回 HTTP {status}")); }
+    let value = response.json::<serde_json::Value>().await.map_err(|error| format!("Google 响应读取失败：{error}"))?;
+    let translation = value.get(0).and_then(|value| value.as_array()).into_iter().flatten().filter_map(|row| row.get(0).and_then(|value| value.as_str())).collect::<Vec<_>>().join("");
+    if translation.is_empty() { return Err("Google 未返回译文".into()); }
+    return Ok(serde_json::json!({ "translation": translation }).to_string());
+  }
+  let (url, query): (&str, Vec<(&str, String)>) = match provider.as_str() {
+    "youdao-web" => ("https://m.youdao.com/translate", vec![("inputtext", text.into()), ("type", if source == "ja" { "JA2ZH_CN".into() } else { "AUTO".into() })]),
+    _ => return Err("不支持的网页机翻服务".into()),
+  };
+  let response = client.get(url).query(&query).send().await.map_err(|error| format!("网页机翻请求失败：{error}"))?;
+  let status = response.status();
+  let html = response.text().await.map_err(|error| format!("无法读取网页机翻响应：{error}"))?;
+  if !status.is_success() { return Err(format!("网页机翻返回 HTTP {status}")); }
+  Ok(html)
+}
+
+fn page_value<'a>(text: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
+  let start = text.find(prefix)? + prefix.len();
+  let rest = &text[start..];
+  Some(&rest[..rest.find(suffix)?])
+}
+
+async fn bing_web_translation(client: &reqwest::Client, text: &str, source: &str) -> Result<String, String> {
+  let page = client.get("https://www.bing.com/translator").send().await.map_err(|error| format!("Bing 页面加载失败：{error}"))?;
+  let base = format!("{}://{}", page.url().scheme(), page.url().host_str().unwrap_or("www.bing.com"));
+  let cookies = page.headers().get_all(reqwest::header::SET_COOKIE).iter().filter_map(|value| value.to_str().ok()).filter_map(|value| value.split(';').next()).collect::<Vec<_>>().join("; ");
+  let html = page.text().await.map_err(|error| format!("Bing 页面读取失败：{error}"))?;
+  let ig = page_value(&html, "IG:\"", "\"").or_else(|| page_value(&html, "\"ig\":\"", "\"")).ok_or("Bing 页面未返回 IG")?;
+  let helper = page_value(&html, "params_AbusePreventionHelper = [", "]").ok_or("Bing 页面未返回临时凭据")?;
+  let mut helper_parts = helper.splitn(3, ',');
+  let key = helper_parts.next().ok_or("Bing 临时 key 缺失")?.trim();
+  let token = helper_parts.next().ok_or("Bing 临时 token 缺失")?.trim().trim_matches('\"');
+  let iid = page_value(&html, "id=\"rich_tta\" data-iid=\"", "\"").unwrap_or("translator.5023");
+  let mut request = client.post(format!("{base}/ttranslatev3?isVertical=1&IG={ig}&IID={iid}"))
+    .header(reqwest::header::ORIGIN, &base)
+    .header(reqwest::header::REFERER, format!("{base}/translator"))
+    .form(&[("fromLang", if source == "ja" { "ja" } else { "auto-detect" }), ("to", "zh-Hans"), ("text", text), ("token", token), ("key", key)]);
+  if !cookies.is_empty() { request = request.header(reqwest::header::COOKIE, cookies); }
+  let response = request.send().await.map_err(|error| format!("Bing 翻译请求失败：{error}"))?;
+  let status = response.status();
+  let body = response.text().await.map_err(|error| format!("Bing 响应读取失败：{error}"))?;
+  if !status.is_success() { return Err(if status.as_u16() == 401 { "Bing 要求进行网页验证，请稍后重试或切换服务".into() } else { format!("Bing 返回 HTTP {status}") }); }
+  let value: serde_json::Value = serde_json::from_str(&body).map_err(|_| "Bing 返回了无法解析的响应".to_string())?;
+  let translation = value.get(0).and_then(|item| item.get("translations")).and_then(|items| items.get(0)).and_then(|item| item.get("text")).and_then(|item| item.as_str()).ok_or("Bing 未返回译文")?;
+  Ok(serde_json::json!({ "translation": translation }).to_string())
+}
+
+async fn deepl_rpc(client: &reqwest::Client, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+  let id = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64 % 1_000_000;
+  let payload = serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params, "id": id });
+  let body = payload.to_string().replace(&format!("\"method\":\"{method}\""), &format!("\"method\": \"{method}\""));
+  let response = client.post(format!("https://www2.deepl.com/jsonrpc?client=chrome-extension,1.28.0&method={method}"))
+    .header(reqwest::header::CONTENT_TYPE, "application/json")
+    .header(reqwest::header::ORIGIN, "chrome-extension://cofdbpoegempjloogbagkncekinflcnj")
+    .header(reqwest::header::REFERER, "https://www.deepl.com/")
+    .header(reqwest::header::AUTHORIZATION, "None")
+    .body(body).send().await.map_err(|error| format!("DeepL 请求失败：{error}"))?;
+  let status = response.status();
+  let value = response.json::<serde_json::Value>().await.map_err(|error| format!("DeepL 响应读取失败：{error}"))?;
+  if !status.is_success() { return Err(if status.as_u16() == 429 { "DeepL 请求过于频繁，请稍后重试".into() } else { format!("DeepL 返回 HTTP {status}") }); }
+  Ok(value)
+}
+
+async fn deepl_web_translation(client: &reqwest::Client, text: &str, source: &str, _target: &str) -> Result<String, String> {
+  let selected = if source == "ja" { "ja" } else { "auto" };
+  let split = deepl_rpc(client, "LMT_split_text", serde_json::json!({
+    "commonJobParams": { "mode": "translate" }, "lang": { "lang_user_selected": selected }, "texts": [text], "textType": "plaintext"
+  })).await?;
+  let detected = split.pointer("/result/lang/detected").and_then(|value| value.as_str()).unwrap_or("JA");
+  let chunks = split.pointer("/result/texts/0/chunks").and_then(|value| value.as_array()).ok_or("DeepL 未能拆分原文")?;
+  let jobs = chunks.iter().enumerate().map(|(index, chunk)| {
+    let sentence = chunk.pointer("/sentences/0");
+    let before = if index > 0 { chunks[index - 1].pointer("/sentences/0/text").and_then(|value| value.as_str()).map(|value| vec![value]).unwrap_or_default() } else { Vec::new() };
+    let after = if index + 1 < chunks.len() { chunks[index + 1].pointer("/sentences/0/text").and_then(|value| value.as_str()).map(|value| vec![value]).unwrap_or_default() } else { Vec::new() };
+    serde_json::json!({ "kind": "default", "preferred_num_beams": 4, "raw_en_context_before": before, "raw_en_context_after": after,
+      "sentences": [{ "prefix": sentence.and_then(|value| value.get("prefix")).and_then(|value| value.as_str()).unwrap_or(""), "text": sentence.and_then(|value| value.get("text")).and_then(|value| value.as_str()).unwrap_or(""), "id": index + 1 }] })
+  }).collect::<Vec<_>>();
+  let translated = deepl_rpc(client, "LMT_handle_jobs", serde_json::json!({
+    "commonJobParams": { "mode": "translate" }, "lang": { "source_lang_computed": detected, "target_lang": "ZH" }, "jobs": jobs, "priority": 1,
+    "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+  })).await?;
+  let translations = translated.pointer("/result/translations").and_then(|value| value.as_array()).ok_or("DeepL 未返回译文")?;
+  let output = translations.iter().filter_map(|item| item.pointer("/beams/0/sentences/0/text").and_then(|value| value.as_str())).collect::<Vec<_>>().join("");
+  if output.is_empty() { return Err("DeepL 未返回译文".into()); }
+  Ok(serde_json::json!({ "translation": output }).to_string())
+}
+
 #[derive(Debug, Serialize)]
 struct QwenFlashOutput { content: String }
 
@@ -928,8 +1037,9 @@ pub fn run() {
   let application = application
     .manage(MeikiState(Arc::new(Mutex::new(None))))
     .manage(tv_cast::TvCastState::new())
-    .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, entity_web_search, qwen_flash_request, tv_cast::tv_cast_devices, tv_cast::tv_cast_connect, tv_cast::tv_cast_status, tv_cast::tv_cast_push, tv_cast::tv_cast_disconnect])
+    .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, nllb::nllb_status, nllb::nllb_install, entity_web_search, machine_translation_page, qwen_flash_request, tv_cast::tv_cast_devices, tv_cast::tv_cast_connect, tv_cast::tv_cast_status, tv_cast::tv_cast_push, tv_cast::tv_cast_disconnect])
     .setup(|app| {
+      app.manage(nllb::NllbState::new(app.handle()).map_err(std::io::Error::other)?);
       #[cfg(not(any(target_os = "android", target_os = "ios")))]
       {
       let meiki = app.state::<MeikiState>().0.clone();

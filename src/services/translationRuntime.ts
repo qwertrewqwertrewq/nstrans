@@ -1,4 +1,4 @@
-import type { TranslationEngineId } from '../types'
+import type { MachineTranslationProvider, TranslationEngineId } from '../types'
 import type { GlossaryEntry } from '../gameAdapters/types'
 import type { TranslationRequest } from './translator'
 import { invoke, isTauri } from '@tauri-apps/api/core'
@@ -7,17 +7,19 @@ import { buildTranslateGemmaBatchPrompt, buildTranslateGemmaPrompt } from './tra
 import { writeDiagnosticLog } from './diagnosticLog'
 import { qwenTranslateMany } from './qwenFlash'
 import type { RemoteModelCapability } from './entitySearchSettings'
+import { translateManyWithWebPage, webMachineProviderLabels } from './webMachineTranslation'
 
 export type ConversationTurn = { sources: string[]; translations: string[] }
 export type TerminologyResearch = { term: string; query: string; evidence: string[]; sourceUrls: string[] }
 export type LlamaBackend = 'cuda' | 'vulkan' | 'cpu'
 export type LlamaBackendStatus = { backend: LlamaBackend }
 export type ModelDownloadProgress = {
-  phase: 'downloading' | 'validating' | 'importing' | 'completed'
+  phase: 'downloading' | 'validating' | 'extracting' | 'importing' | 'completed'
   downloadedBytes: number
   totalBytes?: number
   percent?: number
 }
+type NllbInstallStatus = { available: boolean; modelUrl?: string; error?: string }
 export type RuntimeRequest = {
   requests: TranslationRequest[]
   history?: ConversationTurn[]
@@ -27,6 +29,7 @@ export type RuntimeRequest = {
   gameNames?: readonly string[]
   translationInstruction?: string
   remoteModel?: { apiKey: string; model: string; endpoint?: string; capability: RemoteModelCapability }
+  machineProvider?: MachineTranslationProvider
 }
 export interface TranslationRuntime {
   id: TranslationEngineId
@@ -118,9 +121,53 @@ const remoteLlmRuntime: TranslationRuntime = {
   },
 }
 
+const nllbRuntime: TranslationRuntime = {
+  id: 'nllb-600m', label: 'NLLB-200 Distilled 600M',
+  available: async () => {
+    if (import.meta.env.VITE_NSTRANS_REMOTE_ONLY === '1') return false
+    if (!isTauri()) return true
+    return invoke<NllbInstallStatus>('nllb_status').then((result) => result.available).catch(() => false)
+  },
+  translateMany: async ({ requests }) => {
+    if (import.meta.env.VITE_NSTRANS_REMOTE_ONLY === '1') throw new Error('NLLB-600M 仅包含在 WithLlama 构建中')
+    const startedAt = performance.now()
+    writeDiagnosticLog('LLM', '发送本机 NLLB 请求', `${requests.length} 条 · 日语 → 简体中文`, 'info')
+    const { translateWithNllb } = await import('./nllbRuntime')
+    const installed = isTauri() ? await invoke<NllbInstallStatus>('nllb_install') : undefined
+    if (isTauri() && (!installed?.available || !installed.modelUrl)) throw new Error(installed?.error || 'NLLB-600M 本机模型安装失败')
+    const translations = await translateWithNllb(requests, (progress) => {
+      if (progress.status === 'progress' && typeof progress.progress === 'number') {
+        writeDiagnosticLog('LLM', 'NLLB 模型加载', `${progress.file ?? '模型'} · ${progress.progress.toFixed(1)}%`, 'info', 2_000)
+      }
+    }, installed?.modelUrl)
+    writeDiagnosticLog('LLM', 'NLLB 响应', `${translations.length} 条 · ${Math.round(performance.now() - startedAt)} ms`, 'success')
+    return translations
+  },
+}
+
+const webMachineRuntime: TranslationRuntime = {
+  id: 'web-machine', label: '远程网页机翻', available: async () => true,
+  translateMany: async ({ requests, machineProvider }) => {
+    const provider = machineProvider && machineProvider !== 'nllb-600m' ? machineProvider : 'youdao-web'
+    const label = webMachineProviderLabels[provider]
+    const startedAt = performance.now()
+    writeDiagnosticLog('LLM', '发送网页机翻请求', `${label} · ${requests.length} 条`, 'info')
+    try {
+      const translations = await translateManyWithWebPage(provider, requests)
+      writeDiagnosticLog('LLM', '网页机翻响应', `${label} · ${translations.length} 条 · ${Math.round(performance.now() - startedAt)} ms`, 'success')
+      return translations
+    } catch (reason) {
+      writeDiagnosticLog('LLM', '网页机翻失败', `${label} · ${reason instanceof Error ? reason.message : String(reason)}`, 'error')
+      throw reason
+    }
+  },
+}
+
 export const translationRuntimes: Record<TranslationEngineId, TranslationRuntime> = {
   translategemma: translateGemmaRuntime,
   'remote-llm': remoteLlmRuntime,
+  'nllb-600m': nllbRuntime,
+  'web-machine': webMachineRuntime,
 }
 
 export async function translationRuntimeStatus() {
@@ -130,6 +177,29 @@ export async function translationRuntimeStatus() {
 
 export async function unloadTranslateGemma() {
   if (isTauri()) await invoke('translategemma_unload')
+}
+
+export async function prepareNllb(onProgress?: (progress: { status?: string; file?: string; progress?: number; loaded?: number; total?: number }) => void) {
+  if (import.meta.env.VITE_NSTRANS_REMOTE_ONLY === '1') throw new Error('NLLB-600M 仅包含在 WithLlama 构建中')
+  const runtime = await import('./nllbRuntime')
+  if (!isTauri()) return runtime.prepareNllb(onProgress)
+  let unlisten: UnlistenFn | undefined
+  if (onProgress) {
+    unlisten = await listen<ModelDownloadProgress>('nllb-model-progress', (event) => onProgress({
+      status: event.payload.phase,
+      file: 'NLLB Q8 单包',
+      progress: event.payload.percent,
+      loaded: event.payload.downloadedBytes,
+      total: event.payload.totalBytes,
+    }))
+  }
+  try {
+    const installed = await invoke<NllbInstallStatus>('nllb_install')
+    if (!installed.available || !installed.modelUrl) throw new Error(installed.error || 'NLLB-600M 本机模型安装失败')
+    await runtime.prepareNllb(onProgress, installed.modelUrl)
+  } finally {
+    unlisten?.()
+  }
 }
 
 export async function getTranslateGemmaBackend(): Promise<LlamaBackendStatus> {

@@ -34,9 +34,11 @@
     "community:sync-katakana": "node scripts/sync-common-katakana.mjs",
     "native:build": "node scripts/build-native.mjs",
     "ocr:setup": "python3 -m venv .venv && .venv/bin/pip install meikiocr",
-    "models:setup": "ollama pull translategemma:4b"
+    "models:setup": "ollama pull translategemma:4b",
+    "models:prepare:nllb": "node scripts/prepare-nllb-mirror.mjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@tauri-apps/api": "^2.11.1",
     "lucide-react": "^1.38.0",
     "react": "^19.2.8",

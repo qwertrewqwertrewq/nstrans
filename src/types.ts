@@ -1,12 +1,14 @@
 export type Box = { x0: number; y0: number; x1: number; y1: number }
-export type TranslationEngineId = 'translategemma' | 'remote-llm'
+export type TranslationEngineId = 'translategemma' | 'remote-llm' | 'nllb-600m' | 'web-machine'
+export type MachineTranslationProvider = 'nllb-600m' | 'youdao-web' | 'google-web' | 'bing-web' | 'deepl-web'
 export type TextRegion = { id: string; source: string; translated: string; confidence: number; box: Box; fontFamily?: 'serif' | 'sans'; translationEngine?: TranslationEngineId; translationSource?: string; marqueeDurationMs?: number }
 export type LatencySample = { capture: number; ocr: number; translate: number; render: number; total: number }
 export type TranslationProvider = 'macos' | 'llm' | 'preview'
 export type TranslationRoutingSettings = {
   gameId: GameId
   translationStrategy: 'knowledge-assisted' | 'direct'
-  coreTranslationEngine: 'local' | 'remote'
+  coreTranslationEngine: 'local' | 'remote' | 'machine'
+  machineTranslationProvider: MachineTranslationProvider
   contextResetSeconds: number
   contextMaxTurns: number
   entityLookupEnabled: boolean

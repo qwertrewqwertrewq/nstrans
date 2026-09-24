@@ -128,6 +128,22 @@ describe('TranslationRouter', () => {
     expect(calls[0][2]).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'プルア', target: '普尔亚' })]))
   })
 
+  it('routes machine translation and protects confirmed terms before sending text', async () => {
+    const memory = new TranslationMemory()
+    memory.rememberEntity({ gameId: 'zelda-totk', source: 'プルア', target: '普尔亚', status: 'learned', updatedAt: 1 })
+    const translateMany = vi.fn(async ({ requests }: Parameters<TranslationRuntime['translateMany']>[0]) => requests.map(() => '普尔亚来到了这里'))
+    const router = new TranslationRouter({
+      'web-machine': { id: 'web-machine', label: '网页机翻', available: async () => true, translateMany },
+    }, memory)
+    const settings = { ...defaultRoutingSettings, coreTranslationEngine: 'machine' as const, machineTranslationProvider: 'youdao-web' as const }
+    const result = await router.translate([request('プルアはこちらへ来ました。')], settings)
+    expect(translateMany).toHaveBeenCalledWith(expect.objectContaining({
+      requests: [expect.objectContaining({ text: '普尔亚はこちらへ来ました。' })],
+      machineProvider: 'youdao-web',
+    }))
+    expect(result).toEqual([{ text: '普尔亚来到了这里', engine: 'web-machine' }])
+  })
+
   it('never lets a local learned candidate override a selected-game dictionary term in the LLM glossary', async () => {
     const calls: unknown[][] = [], memory = new TranslationMemory(), dictionaries = new DictionaryPackRepository()
     memory.rememberEntity({ gameId: 'zelda-totk', source: 'ゼルダ', target: '薩爾達 消歧義', status: 'learned', updatedAt: 1 })
