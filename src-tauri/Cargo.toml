@@ -1,6 +1,6 @@
 [package]
 name = "nstrans"
-version = "0.1.1"
+version = "0.1.2"
 description = "Real-time Japanese OCR and translation overlay"
 authors = ["NSTrans contributors"]
 license = "Apache-2.0"

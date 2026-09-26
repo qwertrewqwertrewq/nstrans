@@ -61,7 +61,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     }).toString()
     const response = await this.request(url, {
       headers: {
-        'Api-User-Agent': 'NSTrans/0.1.1 (game translation terminology lookup)',
+        'Api-User-Agent': 'NSTrans/0.1.2 (game translation terminology lookup)',
       },
     })
     if (!response.ok) throw new Error(`Wikipedia entity lookup failed: ${response.status}`)
@@ -97,7 +97,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     }).toString()
     const response = await this.request(url, {
       headers: {
-        'Api-User-Agent': 'NSTrans/0.1.1 (game translation terminology lookup)',
+        'Api-User-Agent': 'NSTrans/0.1.2 (game translation terminology lookup)',
       },
     })
     if (!response.ok) return title
@@ -119,7 +119,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     }).toString()
     const response = await this.request(url, {
       headers: {
-        'Api-User-Agent': 'NSTrans/0.1.1 (game translation terminology lookup)',
+        'Api-User-Agent': 'NSTrans/0.1.2 (game translation terminology lookup)',
       },
     })
     if (!response.ok) return { source, status: wikipediaCandidate ? 'pending' : 'missing' }
@@ -159,7 +159,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
         try {
           const response = await this.request(url, {
             headers: {
-              'Api-User-Agent': 'NSTrans/0.1.1 (game translation terminology research)',
+              'Api-User-Agent': 'NSTrans/0.1.2 (game translation terminology research)',
             },
           })
           if (!response.ok) return { query, evidence: [], sourceUrls: [] }

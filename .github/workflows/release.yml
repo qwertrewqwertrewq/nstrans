@@ -41,12 +41,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          notes_file="docs/releases/${RELEASE_TAG}.md"
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" \
+            if [[ -f "$notes_file" ]]; then
+              gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "NSTrans $RELEASE_TAG Alpha" \
+                --prerelease \
+                --notes-file "$notes_file"
+            else
+              gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "NSTrans $RELEASE_TAG Alpha" \
+                --prerelease \
+                --generate-notes
+            fi
+          elif [[ -f "$notes_file" ]]; then
+            gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "NSTrans $RELEASE_TAG Alpha" \
               --prerelease \
-              --generate-notes
+              --notes-file "$notes_file"
           fi
 
   macos:

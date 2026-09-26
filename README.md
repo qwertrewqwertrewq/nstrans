@@ -77,8 +77,8 @@ npm run desktop:build:remote
 
 ```text
 src-tauri/target/release/bundle/macos/NSTrans.app
-src-tauri/target/release/bundle/dmg/NSTrans_0.1.1_aarch64.dmg
-src-tauri/target/release/bundle/dmg/NSTrans_0.1.1_aarch64_remote-only.dmg
+src-tauri/target/release/bundle/dmg/NSTrans_0.1.2_aarch64.dmg
+src-tauri/target/release/bundle/dmg/NSTrans_0.1.2_aarch64_remote-only.dmg
 ```
 
 macOS 客户端内置 Ollama 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）。NSTrans 会在本机回环地址启动隔离的 Ollama 服务，不依赖用户另行安装或启动 Ollama；MeikiOCR 与 ONNX 权重随应用分发并作为默认 OCR，Apple Vision 可由用户手动选择，并在 MeikiOCR 不可用时作为回退。所选 OCR 引擎会保存到本机。最终用户无需安装 Python 或启动外部模型服务。
@@ -141,7 +141,7 @@ npm run windows:build
 生成的 NSIS 安装程序位于：
 
 ```text
-src-tauri\target\release\bundle\nsis\NSTrans_0.1.1_x64-setup.exe
+src-tauri\target\release\bundle\nsis\NSTrans_0.1.2_x64-setup.exe
 ```
 
 ## TranslateGemma 4B 默认模型、来源与兼容限制
@@ -202,8 +202,8 @@ npm run build
 推送 `v*` 标签会触发 `.github/workflows/release.yml`，为四个平台同时生成 `WithLlama` 与 `RemoteOnly` 两套带校验和的安装包，然后使用仓库自动提供的 `GITHUB_TOKEN` 直接上传到对应 GitHub Release：
 
 ```bash
-git tag v0.1.1
-git push myrepo v0.1.1
+git tag v0.1.2
+git push myrepo v0.1.2
 ```
 
 也可以在 GitHub 的 Actions 页面手动运行 “Cross-platform release”，填写一个已经存在并包含该工作流的标签。工作流默认创建或沿用预发布版本，不需要保存 Apple 证书、Android keystore 或个人访问令牌。当前 iPadOS 产物由用户自行签名，Android 产物是调试签名；如需正式发行签名，需要另外通过 GitHub Environments 配置证书和密钥。
