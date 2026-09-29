@@ -440,11 +440,9 @@ function App() {
     return () => window.clearTimeout(timer)
   }, [communityApiKey, knowledgeServices, sharingEnabled, sharingPending])
   useEffect(() => {
-    const key = communityApiKey.trim()
-    if (key.length < 20) return
     let active = true
     const timer = window.setTimeout(() => {
-      void new CommunityGameCatalogClient(communityOrigin, key).list()
+      void new CommunityGameCatalogClient(communityOrigin).list()
         .then((profiles) => {
           if (!active) return
           saveCommunityGameProfiles(profiles)
@@ -456,7 +454,7 @@ function App() {
       active = false
       window.clearTimeout(timer)
     }
-  }, [communityApiKey])
+  }, [])
   useEffect(() => {
     if (clientPlatform !== 'windows') return
     void getTranslateGemmaBackend()

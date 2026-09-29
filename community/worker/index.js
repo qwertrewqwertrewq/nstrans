@@ -399,8 +399,7 @@ async function createTranslationFromWeb(request, env, gameId) {
   return json(result.body, result.status)
 }
 
-async function apiGames(request, env) {
-  const auth = await apiKeyUser(request, env); if (auth.response) return cors(auth.response)
+async function apiGames(_request, env) {
   const { results } = await env.DB.prepare(`SELECT id,japanese_name,chinese_name,poster_url,updated_at
     FROM games WHERE status='approved' ORDER BY chinese_name,id`).all()
   return cors(json({ games: results.map((game) => ({ id: game.id, japaneseName: game.japanese_name, chineseName: game.chinese_name, posterUrl: game.poster_url, updatedAt: game.updated_at })) }))

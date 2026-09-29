@@ -57,10 +57,15 @@ Each source retains at most three distinct translations. A fourth distinct
 translation replaces a lowest-scored existing option; ties are randomized.
 Public dictionary responses contain only the highest-scored translation.
 
-Authenticated data management API:
+Public game catalog:
 
 ```http
 GET /api/v1/games
+```
+
+Authenticated data management API:
+
+```http
 POST /api/v1/games
 POST /api/v1/dictionaries/batch
 POST /api/v1/translations

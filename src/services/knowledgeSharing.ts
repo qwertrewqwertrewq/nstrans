@@ -86,7 +86,7 @@ function communityGameProfile(game: CommunityGameRecord): GameProfile {
 export class CommunityGameCatalogClient {
   private readonly baseUrl: string
   private readonly apiKey: string
-  constructor(baseUrl: string, apiKey: string) { this.baseUrl = baseUrl.replace(/\/$/u, ''); this.apiKey = apiKey.trim() }
+  constructor(baseUrl: string, apiKey = '') { this.baseUrl = baseUrl.replace(/\/$/u, ''); this.apiKey = apiKey.trim() }
 
   private headers() {
     if (!this.apiKey) throw new Error('请先填写社区客户端 API Key')
@@ -94,7 +94,7 @@ export class CommunityGameCatalogClient {
   }
 
   async list(): Promise<GameProfile[]> {
-    const response = await fetch(`${this.baseUrl}/api/v1/games`, { headers: this.headers() })
+    const response = await fetch(`${this.baseUrl}/api/v1/games`)
     const body = await response.json() as { games?: CommunityGameRecord[]; error?: string }
     if (!response.ok) throw new Error(body.error || `社区游戏列表读取失败 (${response.status})`)
     return (body.games ?? []).filter((game) => game.id !== 'general').map(communityGameProfile)

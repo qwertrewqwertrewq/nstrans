@@ -76,10 +76,11 @@ describe('CommunityGameCatalogClient', () => {
     })
     vi.stubGlobal('fetch', request)
 
-    const games = await new CommunityGameCatalogClient('https://nstrans.example', 'nst_live_test').list()
+    const games = await new CommunityGameCatalogClient('https://nstrans.example').list()
 
     expect(games).toHaveLength(1)
     expect(games[0]).toEqual(expect.objectContaining({ id: 'persona-5', searchNames: ['ペルソナ5', '女神异闻录 5'] }))
+    expect(request).toHaveBeenCalledWith('https://nstrans.example/api/v1/games')
     vi.unstubAllGlobals()
   })
 })

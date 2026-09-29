@@ -27,11 +27,10 @@
           <article class="panel table-panel"><div class="panel-title"><div><h2>有效密钥</h2><p>服务端只保存哈希；新 Key 仅在创建后显示一次。</p></div><span>最多 5 个</span></div><div id="newKey" class="secret-box" hidden></div><div id="keyList" class="data-list"></div></article>
           <aside class="notice"><strong>安全提示</strong><p>不要在截图、日志或公开仓库中分享 Key。撤销后，使用该 Key 的客户端会立即停止上传，但匿名下载不受影响。</p></aside>
           <article class="panel api-reference">
-            <div class="panel-title"><div><h2>词库数据 API</h2><p>以下接口均使用客户端密钥认证。score 是统一的可信度评分：赞 +1、踩 -1，API 新增或修改 +1。</p></div><span>API v1</span></div>
+            <div class="panel-title"><div><h2>词库数据 API</h2><p>游戏列表可匿名读取；写入与词库管理接口使用客户端密钥认证。score 是统一的可信度评分：赞 +1、踩 -1，API 新增或修改 +1。</p></div><span>API v1</span></div>
             <div class="api-reference-body">
               <p class="api-auth"><strong>认证请求头</strong><code>Authorization: Bearer nst_live_••••</code></p>
-              <section><h3>获取游戏列表</h3><pre><code>curl https://nstrans.221129.xyz/api/v1/games \
-  -H "Authorization: Bearer nst_live_••••"</code></pre></section>
+              <section><h3>获取游戏列表（无需密钥）</h3><pre><code>curl https://nstrans.221129.xyz/api/v1/games</code></pre></section>
               <section><h3>新增游戏</h3><pre><code>curl https://nstrans.221129.xyz/api/v1/games \
   -X POST \
   -H "Authorization: Bearer nst_live_••••" \
