@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CommunityContributionQueue, CommunityDictionaryEditor, isShareableContribution } from './knowledgeSharing'
+import { CommunityContributionQueue, CommunityDictionaryEditor, CommunityGameCatalogClient, isShareableContribution } from './knowledgeSharing'
 
 describe('CommunityContributionQueue', () => {
   it('is opt-in and never queues local knowledge before consent', () => {
@@ -39,6 +39,47 @@ describe('CommunityDictionaryEditor', () => {
     const result = await new CommunityDictionaryEditor('https://nstrans.example', 'nst_live_test').editOrCreate({ gameId: 'zelda-totk', oldSource: 'ハイラル', oldTarget: '海拉鲁', source: 'ハイラル', target: '海拉鲁大陆' })
     expect(result).toEqual({ created: false, score: 8, scoreDelta: 1 })
     expect(request).toHaveBeenNthCalledWith(2, 'https://nstrans.example/api/v1/translations/123', expect.objectContaining({ method: 'PATCH', headers: expect.objectContaining({ authorization: 'Bearer nst_live_test' }) }))
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('CommunityGameCatalogClient', () => {
+  it('creates a community game with the authenticated API and accepts an omitted Japanese name', async () => {
+    const request = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'final-fantasy-vii-remake', chineseName: '最终幻想 VII 重制版', japaneseName: '', posterUrl: null }),
+    })
+    vi.stubGlobal('fetch', request)
+
+    const game = await new CommunityGameCatalogClient('https://nstrans.example/', 'nst_live_test').create({ chineseName: '最终幻想 VII 重制版' })
+
+    expect(game).toEqual(expect.objectContaining({
+      id: 'final-fantasy-vii-remake',
+      label: '最终幻想 VII 重制版',
+      searchNames: ['最终幻想 VII 重制版'],
+    }))
+    expect(request).toHaveBeenCalledWith('https://nstrans.example/api/v1/games', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ authorization: 'Bearer nst_live_test' }),
+      body: JSON.stringify({ chineseName: '最终幻想 VII 重制版' }),
+    }))
+    vi.unstubAllGlobals()
+  })
+
+  it('downloads the server catalog while keeping the built-in general profile out of selectable games', async () => {
+    const request = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ games: [
+        { id: 'general', chineseName: '通用游戏', japaneseName: '汎用ゲーム' },
+        { id: 'persona-5', chineseName: '女神异闻录 5', japaneseName: 'ペルソナ5' },
+      ] }),
+    })
+    vi.stubGlobal('fetch', request)
+
+    const games = await new CommunityGameCatalogClient('https://nstrans.example', 'nst_live_test').list()
+
+    expect(games).toHaveLength(1)
+    expect(games[0]).toEqual(expect.objectContaining({ id: 'persona-5', searchNames: ['ペルソナ5', '女神异闻录 5'] }))
     vi.unstubAllGlobals()
   })
 })

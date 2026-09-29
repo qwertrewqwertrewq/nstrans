@@ -8,7 +8,9 @@ const capabilityLabels: Record<RemoteModelCapability, string> = {
   offline: '离线模型（未来）',
 }
 
-export function RemoteModelManager({ settings, onChange }: { settings: EntitySearchSettings; onChange(next: Partial<EntitySearchSettings>): void }) {
+type RemoteModelManagerMode = 'full' | 'models' | 'credentials'
+
+export function RemoteModelManager({ settings, onChange, mode = 'full' }: { settings: EntitySearchSettings; onChange(next: Partial<EntitySearchSettings>): void; mode?: RemoteModelManagerMode }) {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState({
     name: '',
@@ -19,6 +21,8 @@ export function RemoteModelManager({ settings, onChange }: { settings: EntitySea
   })
   const searchModels = useMemo(() => settings.remoteModels.filter(({ capability }) => capability !== 'offline'), [settings.remoteModels])
   const visionModels = useMemo(() => settings.remoteModels.filter(({ capability }) => capability === 'multimodal-search'), [settings.remoteModels])
+  const showCredentials = mode !== 'models'
+  const showModels = mode !== 'credentials'
   const addModel = () => {
     const model = draft.model.trim(),
       name = draft.name.trim() || model
@@ -52,13 +56,13 @@ export function RemoteModelManager({ settings, onChange }: { settings: EntitySea
   }
   return (
     <div className="remote-model-manager">
-      <div className="remote-defaults">
-        <label>百炼通用 API Key</label>
+      {showCredentials && <div className="remote-defaults">
+        <label>阿里百炼（千问）通用 API Key</label>
         <input type="password" value={settings.qwenApiKey} onChange={(event) => onChange({ qwenApiKey: event.target.value })} placeholder="DashScope API Key" autoComplete="off" />
         <label>自定义 API 端点（可选）</label>
         <input type="url" value={settings.qwenEndpoint} onChange={(event) => onChange({ qwenEndpoint: event.target.value })} placeholder="留空使用 DashScope 默认端点" />
-      </div>
-      <div className="inline-select">
+      </div>}
+      {showModels && <><div className="inline-select">
         <label>术语搜索模型</label>
         <div className="select-wrap">
           <select value={settings.searchModelId} onChange={(event) => onChange({ searchModelId: event.target.value })}>
@@ -115,8 +119,8 @@ export function RemoteModelManager({ settings, onChange }: { settings: EntitySea
             </select>
             <ChevronDown size={13} />
           </div>
-          <input type="url" value={draft.endpoint} onChange={(event) => setDraft({ ...draft, endpoint: event.target.value })} placeholder="API 端点（可继承通用端点）" />
-          <input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder="API Key（可继承通用 Key）" autoComplete="off" />
+          {mode === 'full' && <input type="url" value={draft.endpoint} onChange={(event) => setDraft({ ...draft, endpoint: event.target.value })} placeholder="API 端点（可继承通用端点）" />}
+          {mode === 'full' && <input type="password" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder="API Key（可继承通用 Key）" autoComplete="off" />}
           <button className="primary" disabled={!draft.model.trim()} onClick={addModel}>
             保存模型
           </button>
@@ -142,6 +146,19 @@ export function RemoteModelManager({ settings, onChange }: { settings: EntitySea
         </div>
       )}
       <small className="muted">多模态 + 搜索模型可同时用于术语查询和远程视觉识别；仅搜索模型不会接收截图；离线模型当前只保存配置，不参与自动路由。核心翻译模型请在“翻译与词库”中选择。</small>
+      </>}
+      {mode === 'credentials' && settings.remoteModels.some((item) => !item.preset) && (
+        <div className="custom-model-credentials">
+          <label>自定义模型凭据覆盖</label>
+          {settings.remoteModels.filter((item) => !item.preset).map((item) => (
+            <div key={item.id}>
+              <strong>{item.name}</strong>
+              <input type="url" value={item.endpoint ?? ''} onChange={(event) => onChange({ remoteModels: settings.remoteModels.map((model) => model.id === item.id ? { ...model, endpoint: event.target.value } : model) })} placeholder="继承通用 API 端点" />
+              <input type="password" value={item.apiKey ?? ''} onChange={(event) => onChange({ remoteModels: settings.remoteModels.map((model) => model.id === item.id ? { ...model, apiKey: event.target.value } : model) })} placeholder="继承阿里百炼（千问）通用 API Key" autoComplete="off" />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

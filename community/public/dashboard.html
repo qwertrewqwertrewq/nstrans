@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>控制面板 · NSTrans</title><link rel="icon" href="/project-logo.svg"><link rel="stylesheet" href="/styles.css"></head>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>控制面板 · NSTrans</title><link rel="icon" href="/project-logo.svg"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/dashboard-games.css"></head>
 <body data-page="dashboard">
   <div class="console-shell">
     <aside class="console-sidebar">
@@ -10,8 +10,6 @@
         <a data-route="keys" href="/dashboard?view=keys"><i>◇</i>客户端密钥</a>
         <a data-route="games" href="/dashboard?view=games"><i>▦</i>游戏管理</a>
         <a data-route="dictionary" href="/dashboard?view=dictionary"><i>文</i>词库与评分</a>
-        <span>管理</span>
-        <a id="adminNav" data-route="review" href="/dashboard?view=review" hidden><i>✓</i>审核队列 <b id="pendingCount"></b></a>
       </nav>
       <div class="sidebar-foot"><a href="/download">客户端与 Release <b>↗</b></a><a href="https://github.com/qwertrewqwertrewq/nstrans" target="_blank" rel="noreferrer">GitHub 项目 <b>↗</b></a><a href="/client">客户端文档 <b>↗</b></a><a href="/">返回首页 <b>↗</b></a></div>
     </aside>
@@ -21,7 +19,7 @@
         <div id="flash" class="flash" hidden></div>
         <section data-view="overview" class="console-view">
           <header class="view-head"><div><span class="kicker">OVERVIEW</span><h1>上午好，<span id="welcomeName">贡献者</span></h1><p>这里是 NSTrans 社区词库的运行概况。</p></div><a class="button" href="/dashboard?view=keys">配置客户端 <b>→</b></a></header>
-          <div class="metric-grid"><article><span>游戏</span><strong id="dashGames">—</strong><small>已批准并开放</small></article><article><span>词条</span><strong id="dashTerms">—</strong><small>名词与短句</small></article><article><span>译文</span><strong id="dashTranslations">—</strong><small>全部候选</small></article><article><span>贡献者</span><strong id="dashContributors">—</strong><small>GitHub 用户</small></article></div>
+          <div class="metric-grid"><article><span>游戏</span><strong id="dashGames">—</strong><small>已创建并开放</small></article><article><span>词条</span><strong id="dashTerms">—</strong><small>名词与短句</small></article><article><span>译文</span><strong id="dashTranslations">—</strong><small>全部候选</small></article><article><span>贡献者</span><strong id="dashContributors">—</strong><small>GitHub 用户</small></article></div>
           <div class="overview-grid"><article class="panel"><span class="panel-index">QUICK START</span><h2>把社区词库接入客户端</h2><p>生成一个个人密钥，粘贴到 OCR 客户端并主动开启共享。公开词库的下载始终匿名可用。</p><a class="text-link" href="/client">阅读接入说明 <b>→</b></a></article><article class="panel status-panel"><span class="panel-index">SYSTEM</span><div><i></i><strong>词库服务运行正常</strong></div><p>公开读取、贡献上传与评分服务均已启用。</p></article></div>
         </section>
         <section data-view="keys" class="console-view" hidden>
@@ -34,6 +32,11 @@
               <p class="api-auth"><strong>认证请求头</strong><code>Authorization: Bearer nst_live_••••</code></p>
               <section><h3>获取游戏列表</h3><pre><code>curl https://nstrans.221129.xyz/api/v1/games \
   -H "Authorization: Bearer nst_live_••••"</code></pre></section>
+              <section><h3>新增游戏</h3><pre><code>curl https://nstrans.221129.xyz/api/v1/games \
+  -X POST \
+  -H "Authorization: Bearer nst_live_••••" \
+  -H "Content-Type: application/json" \
+  -d '{"chineseName":"游戏中文名","japaneseName":"ゲーム日本語名","posterUrl":"https://…"}'</code></pre><p>仅 chineseName 必填；日文名与 HTTPS 封面 URL 可省略。创建后立即开放，无需审核。</p></section>
               <section><h3>按游戏 ID 批量获取词库</h3><pre><code>curl https://nstrans.221129.xyz/api/v1/dictionaries/batch \
   -X POST \
   -H "Authorization: Bearer nst_live_••••" \
@@ -69,24 +72,21 @@
           </article>
         </section>
         <section data-view="games" class="console-view" hidden>
-          <header class="view-head"><div><span class="kicker">GAME CATALOG</span><h1>游戏管理</h1><p>浏览已开放游戏，或提交新的游戏适配。</p></div><button class="button" data-open-dialog="gameDialog">新增游戏</button></header>
+          <header class="view-head"><div><span class="kicker">GAME CATALOG</span><h1>游戏管理</h1><p>浏览已开放游戏，或直接新增游戏适配。</p></div><button class="button" data-open-dialog="gameDialog">新增游戏</button></header>
           <div id="gameList" class="catalog-grid"></div>
         </section>
         <section data-view="dictionary" class="console-view" hidden>
           <header class="view-head"><div><span class="kicker">DICTIONARY</span><h1>词库与评分</h1><p>评分代表译文可信度：赞 +1、踩 -1，网页新增或修改 +3。</p></div><button class="button" data-open-dialog="newEntryDialog">新增词条</button></header>
           <article class="panel dictionary-panel">
             <div class="dictionary-toolbar"><label>当前游戏<select id="dictionaryGame"></select></label><label>搜索原文或译文<input id="dictionarySearch" type="search" placeholder="输入日文或中文"></label><label>排序<select id="dictionarySort"><option value="pronunciation">日语发音</option><option value="score">评分从高到低</option></select></label></div>
-            <div id="termPanel"><div class="empty-state">请选择一个已批准游戏</div></div>
+            <div id="termPanel"><div class="empty-state">请选择一个游戏</div></div>
           </article>
-        </section>
-        <section data-view="review" class="console-view" hidden>
-          <header class="view-head"><div><span class="kicker">ADMIN REVIEW</span><h1>审核队列</h1><p>审核社区提交的游戏名称与海报信息。</p></div></header>
-          <article class="panel table-panel"><div class="panel-title"><div><h2>待审核游戏</h2><p>批准后该游戏会立即开放词典上传与下载。</p></div></div><div id="pendingGames" class="data-list"></div></article>
         </section>
       </main>
     </div>
   </div>
-  <dialog id="gameDialog"><form id="gameForm"><div class="dialog-head"><div><span class="kicker">NEW GAME</span><h2>提交游戏适配</h2></div><button type="button" class="icon-button" data-close-dialog="gameDialog" aria-label="关闭">×</button></div><p>提交后需由管理员审核。请使用稳定、公开的 HTTPS 海报地址。</p><label>游戏日文名<input name="japaneseName" maxlength="120" required placeholder="ゲーム日本語名"></label><label>游戏中文名<input name="chineseName" maxlength="120" required placeholder="游戏中文名"></label><label>海报 URL<input name="posterUrl" type="url" required placeholder="https://…"></label><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog="gameDialog">取消</button><button class="button" type="submit">提交审核</button></div></form></dialog>
+  <dialog id="gameDialog"><form id="gameForm"><div class="dialog-head"><div><span class="kicker">NEW GAME</span><h2>新增游戏适配</h2></div><button type="button" class="icon-button" data-close-dialog="gameDialog" aria-label="关闭">×</button></div><p>新增后立即开放词典上传与下载；管理员可在游戏列表中修正信息。</p><label>游戏中文名（必填）<input name="chineseName" maxlength="120" required placeholder="游戏中文名"></label><label>游戏日文名（可选）<input name="japaneseName" maxlength="120" placeholder="ゲーム日本語名"></label><label>封面 URL（可选）<input name="posterUrl" type="url" placeholder="https://…"></label><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog="gameDialog">取消</button><button class="button" type="submit">立即创建</button></div></form></dialog>
+  <dialog id="gameEditDialog"><form id="gameEditForm"><div class="dialog-head"><div><span class="kicker">EDIT GAME</span><h2>编辑游戏信息</h2></div><button type="button" class="icon-button" data-close-dialog="gameEditDialog" aria-label="关闭">×</button></div><p>仅管理员可以修改游戏名称与封面。</p><input name="id" type="hidden"><label>游戏中文名（必填）<input name="chineseName" maxlength="120" required></label><label>游戏日文名（可选）<input name="japaneseName" maxlength="120"></label><label>封面 URL（可选）<input name="posterUrl" type="url"></label><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog="gameEditDialog">取消</button><button class="button" type="submit">保存修改</button></div></form></dialog>
   <dialog id="entryDialog"><form id="entryForm"><div class="dialog-head"><div><span class="kicker">EDIT ENTRY</span><h2>修改词条</h2></div><button type="button" class="icon-button" data-close-dialog="entryDialog" aria-label="关闭">×</button></div><p>保存会直接覆盖当前原文与译文，并为这条译文增加 3 分。</p><input name="translationId" type="hidden"><label>日文原文<input name="source" maxlength="240" required lang="ja"></label><label>中文译文<input name="target" maxlength="240" required></label><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog="entryDialog">取消</button><button class="button" type="submit">保存并 +3</button></div></form></dialog>
   <dialog id="newEntryDialog"><form id="newEntryForm"><div class="dialog-head"><div><span class="kicker">NEW ENTRY</span><h2>新增词条</h2></div><button type="button" class="icon-button" data-close-dialog="newEntryDialog" aria-label="关闭">×</button></div><p>词条将加入当前选择的游戏，初始可信度评分为 3。</p><label>类型<select name="kind"><option value="term">名词 / 专有名词</option><option value="phrase">单词 / 短句</option></select></label><label>日文原文<input name="source" maxlength="240" required lang="ja"></label><label>中文译文<input name="target" maxlength="240" required></label><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog="newEntryDialog">取消</button><button class="button" type="submit">新增并 +3</button></div></form></dialog>
   <script src="/app.js" defer></script>

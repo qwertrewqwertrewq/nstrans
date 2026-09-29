@@ -1035,6 +1035,7 @@ pub fn run() {
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   let application = application.manage(LlamaState(Arc::new(Mutex::new(None))));
   let application = application
+    .plugin(tauri_plugin_opener::init())
     .manage(MeikiState(Arc::new(Mutex::new(None))))
     .manage(tv_cast::TvCastState::new())
     .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, nllb::nllb_status, nllb::nllb_install, entity_web_search, machine_translation_page, qwen_flash_request, tv_cast::tv_cast_devices, tv_cast::tv_cast_connect, tv_cast::tv_cast_status, tv_cast::tv_cast_push, tv_cast::tv_cast_disconnect])

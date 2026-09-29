@@ -61,6 +61,7 @@ Authenticated data management API:
 
 ```http
 GET /api/v1/games
+POST /api/v1/games
 POST /api/v1/dictionaries/batch
 POST /api/v1/translations
 POST /api/v1/translations/batch
@@ -75,3 +76,9 @@ Single edits accept either or both of `source` and `target`; batch edits accept
 `source`, and `target`. `score` is the unified credibility score: upvotes add 1,
 downvotes subtract 1, API additions/edits add 1, and dashboard additions/edits
 add 3. The edit contribution is retained when later votes change.
+
+Game creation requires only `chineseName`; `japaneseName` and an HTTPS
+`posterUrl` are optional. Newly created games are immediately available and do
+not enter a moderation queue. Administrators may edit or delete games from the
+dashboard; deleting a game also deletes its dictionary through D1 foreign-key
+cascades.

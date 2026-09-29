@@ -19,7 +19,7 @@ async function loadHomeStats() {
   } catch { /* Keep graceful placeholders. */ }
 }
 
-const routeNames = { overview: '概览', keys: '客户端密钥', games: '游戏管理', dictionary: '词库与评分', review: '审核队列' }
+const routeNames = { overview: '概览', keys: '客户端密钥', games: '游戏管理', dictionary: '词库与评分' }
 let dashboardUser = null
 let dashboardGames = []
 let dictionaryTerms = []
@@ -51,28 +51,16 @@ async function initDashboard() {
     $('#roleBadge').textContent = user.role === 'admin' ? '管理员' : '贡献者'
     $('#welcomeName').textContent = user.login
     renderMetrics(stats)
-    setupAdmin(user)
     setupGameForm()
     if (route === 'keys') { $('#createKey').addEventListener('click', createKey); await loadKeys() }
     if (route === 'games') renderGames(dashboardGames)
     if (route === 'dictionary') setupDictionary(dashboardGames)
-    if (route === 'review') {
-      if (user.role !== 'admin') { location.href = '/dashboard'; return }
-      renderPending(dashboardGames.filter((game) => game.status === 'pending'))
-    }
   } catch { location.href = '/auth/github' }
 }
 
 function renderMetrics(stats) {
   const mapping = { dashGames: stats.games, dashTerms: stats.terms, dashTranslations: stats.translations, dashContributors: stats.contributors }
   for (const [id, value] of Object.entries(mapping)) if (document.getElementById(id)) document.getElementById(id).textContent = value
-}
-
-function setupAdmin(user) {
-  if (user.role !== 'admin') return
-  const pending = dashboardGames.filter((game) => game.status === 'pending').length
-  $('#adminNav').hidden = false
-  $('#pendingCount').textContent = pending
 }
 
 async function loadKeys() {
@@ -105,23 +93,26 @@ function setupGameForm() {
       await api('/api/games', { method: 'POST', body: JSON.stringify(body) })
       event.currentTarget.reset()
       $('#gameDialog').close()
-      flash('游戏已提交，等待管理员批准')
+      flash('游戏已创建并立即开放')
       const result = await api('/api/games')
       dashboardGames = result.games
       if ($('#gameList')) renderGames(dashboardGames)
-      setupAdmin(dashboardUser)
     } catch (error) { flash(error.message, true) }
   })
+  $('#gameEditForm').addEventListener('submit', saveGameEdit)
 }
 
 function renderGames(games) {
-  $('#gameList').innerHTML = games.length ? games.map((game) => `<article class="game-tile ${game.status}">${game.poster_url ? `<img src="${escapeHtml(game.poster_url)}" alt="${escapeHtml(game.chinese_name)}海报">` : '<span class="poster-placeholder">NS</span>'}<span><strong>${escapeHtml(game.chinese_name)}</strong><small lang="ja">${escapeHtml(game.japanese_name)}</small><em>${statusName(game.status)}</em>${game.status === 'approved' ? `<a class="text-link" href="/dashboard?view=dictionary&game=${encodeURIComponent(game.id)}">查看词库 →</a>` : ''}</span></article>`).join('') : '<div class="empty-state">暂无游戏</div>'
+  const admin = dashboardUser?.role === 'admin'
+  $('#gameList').innerHTML = games.length ? games.map((game) => `<article class="game-tile">${game.poster_url ? `<img src="${escapeHtml(game.poster_url)}" alt="${escapeHtml(game.chinese_name)}海报">` : '<span class="poster-placeholder">NS</span>'}<span><strong>${escapeHtml(game.chinese_name)}</strong>${game.japanese_name ? `<small lang="ja">${escapeHtml(game.japanese_name)}</small>` : '<small>未填写日文名</small>'}<em>已开放</em><a class="text-link" href="/dashboard?view=dictionary&game=${encodeURIComponent(game.id)}">查看词库 →</a>${admin ? `<span class="game-admin-actions"><button data-edit-game="${escapeHtml(game.id)}">编辑</button>${game.id !== 'general' ? `<button class="danger-link" data-delete-game="${escapeHtml(game.id)}">删除</button>` : ''}</span>` : ''}</span></article>`).join('') : '<div class="empty-state">暂无游戏</div>'
+  $$('[data-edit-game]').forEach((button) => button.addEventListener('click', () => openGameEditor(button.dataset.editGame)))
+  $$('[data-delete-game]').forEach((button) => button.addEventListener('click', () => deleteGame(button.dataset.deleteGame)))
 }
 
 function setupDictionary(games) {
   const approved = games.filter((game) => game.status === 'approved')
   const select = $('#dictionaryGame')
-  select.innerHTML = approved.length ? approved.map((game) => `<option value="${escapeHtml(game.id)}">${escapeHtml(game.chinese_name)} / ${escapeHtml(game.japanese_name)}</option>`).join('') : '<option value="">暂无已批准游戏</option>'
+  select.innerHTML = approved.length ? approved.map((game) => `<option value="${escapeHtml(game.id)}">${escapeHtml(game.chinese_name)}${game.japanese_name ? ` / ${escapeHtml(game.japanese_name)}` : ''}</option>`).join('') : '<option value="">暂无游戏</option>'
   const requested = new URLSearchParams(location.search).get('game')
   if (requested && approved.some((game) => game.id === requested)) select.value = requested
   const reload = () => loadTerms(select.value, select.options[select.selectedIndex]?.textContent || '')
@@ -136,16 +127,39 @@ function setupDictionary(games) {
   if (select.value) loadTerms(select.value, select.options[select.selectedIndex].textContent)
 }
 
-function renderPending(games) {
-  $('#pendingGames').innerHTML = games.length ? games.map((game) => `<div class="list-row game-review"><div><strong>${escapeHtml(game.chinese_name)}</strong><small>${escapeHtml(game.japanese_name)} · 提交者 @${escapeHtml(game.submitter || 'unknown')}</small><a href="${escapeHtml(game.poster_url)}" target="_blank" rel="noreferrer">查看海报 ↗</a></div><span><button class="approve" data-moderate="approve" data-id="${escapeHtml(game.id)}">批准</button><button class="danger-link" data-moderate="reject" data-id="${escapeHtml(game.id)}">拒绝</button></span></div>`).join('') : '<div class="empty-state">没有待审核游戏</div>'
-  $$('[data-moderate]').forEach((button) => button.addEventListener('click', async () => {
-    await api(`/api/admin/games/${encodeURIComponent(button.dataset.id)}/${button.dataset.moderate}`, { method: 'POST' })
-    flash('审核状态已更新')
+function openGameEditor(id) {
+  const game = dashboardGames.find((item) => item.id === id)
+  if (!game) return
+  const form = $('#gameEditForm')
+  form.elements.id.value = game.id
+  form.elements.chineseName.value = game.chinese_name
+  form.elements.japaneseName.value = game.japanese_name || ''
+  form.elements.posterUrl.value = game.poster_url || ''
+  $('#gameEditDialog').showModal()
+}
+
+async function saveGameEdit(event) {
+  event.preventDefault()
+  const form = event.currentTarget
+  try {
+    await api(`/api/admin/games/${encodeURIComponent(form.elements.id.value)}`, { method: 'PATCH', body: JSON.stringify({ chineseName: form.elements.chineseName.value, japaneseName: form.elements.japaneseName.value, posterUrl: form.elements.posterUrl.value }) })
+    $('#gameEditDialog').close()
+    flash('游戏信息已更新')
     const result = await api('/api/games')
     dashboardGames = result.games
-    renderPending(dashboardGames.filter((game) => game.status === 'pending'))
-    setupAdmin(dashboardUser)
-  }))
+    renderGames(dashboardGames)
+  } catch (error) { flash(error.message, true) }
+}
+
+async function deleteGame(id) {
+  const game = dashboardGames.find((item) => item.id === id)
+  if (!game || !confirm(`删除“${game.chinese_name}”会同时删除其全部词条和评分，确定继续吗？`)) return
+  try {
+    await api(`/api/admin/games/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    dashboardGames = dashboardGames.filter((item) => item.id !== id)
+    renderGames(dashboardGames)
+    flash('游戏及其词库已删除')
+  } catch (error) { flash(error.message, true) }
 }
 
 async function loadTerms(gameId, name) {
@@ -222,5 +236,4 @@ async function saveNewEntry(event) {
 function maxScore(term) { return term.translations.reduce((score, translation) => Math.max(score, Number(translation.score) || 0), Number.NEGATIVE_INFINITY) }
 function termCard(term) { return `<article class="term-card"><header><span>${term.kind === 'term' ? '名词' : '短句'}</span><strong lang="ja">${escapeHtml(term.source)}</strong></header><div>${term.translations.map((translation) => `<div class="translation-option"><span>${escapeHtml(translation.target)}</span><div><button data-edit="${translation.id}" title="修改原文和译文">编辑</button><button data-vote="1" data-id="${translation.id}" title="赞">↑</button><b data-score>${translation.score}</b><button data-vote="-1" data-id="${translation.id}" title="踩">↓</button></div></div>`).join('')}</div></article>` }
 function date(value) { return new Date(`${String(value).replace(' ', 'T')}Z`).toLocaleDateString('zh-CN') }
-function statusName(status) { return ({ approved: '已开放', pending: '审核中', rejected: '未通过' })[status] || status }
 function flash(message, error = false) { const element = $('#flash'); element.textContent = message; element.className = `flash ${error ? 'error' : ''}`; element.hidden = false; clearTimeout(flash.timer); flash.timer = setTimeout(() => { element.hidden = true }, 4000) }

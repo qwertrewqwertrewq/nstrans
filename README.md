@@ -31,8 +31,10 @@
 - Switch 游戏策略会合并连续文字、抑制假名注音碎片和孤立按键图标，并保留可信的小字号说明与底部按键提示词
 - 基于文字包围框模糊原文并覆盖译文；长译文滚动显示时锁定近似区域，避免重复翻译和覆盖层跳动
 - 分别显示采集、OCR、翻译、渲染和端到端延迟
+- 可自动匹配并输出 USB/HDMI 采集卡音频，也可手动选择音频输入；不会自动回退到内置麦克风
 - 内置带时间戳的运行日志，记录 OCR 模型启动、识别数量、词库命中、专名搜索和 LLM 请求/响应
 - 可发现同一局域网内的 NSTrans TV 客户端，也可按 IP 握手连接；支持传输透明 PNG 字幕层或带坐标、字体与滚动参数的文本字幕
+- 控制台采用固定视口单页布局，右侧一次只打开一个功能模块；长设置在卡片内部滚动，不推动整个应用页面
 - 翻译方式可在“词库、缓存与学习辅助”和“OCR 原文直送核心翻译”之间切换；直送模式不匹配翻译词库/缓存、不执行术语搜索或学习入库，但仍可启用远程视觉识别
 - 核心翻译可独立选择本机 TranslateGemma 4B、远程 LLM 或机器翻译。`WithLlama` 还提供按需下载的本机 NLLB-200 Distilled 600M；所有构建都可使用无需 API Key 的网易有道、Google、Bing、DeepL 网页机翻
 - 远程核心模型可从所有在线模型配置中选择；多模态模型和仅搜索能力模型都可用于纯文本核心翻译，但仅多模态模型能接收 OCR 原文本及局部截图，离线模型配置暂不参与路由
@@ -77,8 +79,8 @@ npm run desktop:build:remote
 
 ```text
 src-tauri/target/release/bundle/macos/NSTrans.app
-src-tauri/target/release/bundle/dmg/NSTrans_0.1.2_aarch64.dmg
-src-tauri/target/release/bundle/dmg/NSTrans_0.1.2_aarch64_remote-only.dmg
+src-tauri/target/release/bundle/dmg/NSTrans_0.1.3_aarch64.dmg
+src-tauri/target/release/bundle/dmg/NSTrans_0.1.3_aarch64_remote-only.dmg
 ```
 
 macOS 客户端内置 Ollama 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）。NSTrans 会在本机回环地址启动隔离的 Ollama 服务，不依赖用户另行安装或启动 Ollama；MeikiOCR 与 ONNX 权重随应用分发并作为默认 OCR，Apple Vision 可由用户手动选择，并在 MeikiOCR 不可用时作为回退。所选 OCR 引擎会保存到本机。最终用户无需安装 Python 或启动外部模型服务。
@@ -141,7 +143,7 @@ npm run windows:build
 生成的 NSIS 安装程序位于：
 
 ```text
-src-tauri\target\release\bundle\nsis\NSTrans_0.1.2_x64-setup.exe
+src-tauri\target\release\bundle\nsis\NSTrans_0.1.3_x64-setup.exe
 ```
 
 ## TranslateGemma 4B 默认模型、来源与兼容限制
@@ -202,8 +204,8 @@ npm run build
 推送 `v*` 标签会触发 `.github/workflows/release.yml`，为四个平台同时生成 `WithLlama` 与 `RemoteOnly` 两套带校验和的安装包，然后使用仓库自动提供的 `GITHUB_TOKEN` 直接上传到对应 GitHub Release：
 
 ```bash
-git tag v0.1.2
-git push myrepo v0.1.2
+git tag v0.1.3
+git push myrepo v0.1.3
 ```
 
 也可以在 GitHub 的 Actions 页面手动运行 “Cross-platform release”，填写一个已经存在并包含该工作流的标签。工作流默认创建或沿用预发布版本，不需要保存 Apple 证书、Android keystore 或个人访问令牌。当前 iPadOS 产物由用户自行签名，Android 产物是调试签名；如需正式发行签名，需要另外通过 GitHub Environments 配置证书和密钥。

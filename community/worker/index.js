@@ -74,13 +74,14 @@ async function route(request, env) {
   if (/^\/api\/keys\/\d+$/u.test(path) && request.method === 'DELETE') return revokeKey(request, env, Number(path.split('/').pop()))
   if (path === '/api/games' && request.method === 'GET') return listGames(request, env)
   if (path === '/api/games' && request.method === 'POST') return submitGame(request, env)
-  if (/^\/api\/admin\/games\/[^/]+\/approve$/u.test(path) && request.method === 'POST') return moderateGame(request, env, decodeURIComponent(path.split('/')[4]), 'approved')
-  if (/^\/api\/admin\/games\/[^/]+\/reject$/u.test(path) && request.method === 'POST') return moderateGame(request, env, decodeURIComponent(path.split('/')[4]), 'rejected')
+  if (/^\/api\/admin\/games\/[^/]+$/u.test(path) && request.method === 'PATCH') return updateGame(request, env, decodeURIComponent(path.split('/')[4]))
+  if (/^\/api\/admin\/games\/[^/]+$/u.test(path) && request.method === 'DELETE') return deleteGame(request, env, decodeURIComponent(path.split('/')[4]))
   if (/^\/api\/games\/[^/]+\/terms$/u.test(path) && request.method === 'GET') return listTerms(request, env, decodeURIComponent(path.split('/')[3]))
   if (/^\/api\/games\/[^/]+\/terms$/u.test(path) && request.method === 'POST') return createTranslationFromWeb(request, env, decodeURIComponent(path.split('/')[3]))
   if (/^\/api\/translations\/\d+\/vote$/u.test(path) && request.method === 'POST') return vote(request, env, Number(path.split('/')[3]))
   if (/^\/api\/translations\/\d+$/u.test(path) && request.method === 'PATCH') return editTranslationFromWeb(request, env, Number(path.split('/')[3]))
   if (path === '/api/v1/games' && request.method === 'GET') return apiGames(request, env)
+  if (path === '/api/v1/games' && request.method === 'POST') return apiCreateGame(request, env)
   if (path === '/api/v1/dictionaries/batch' && request.method === 'POST') return apiDictionaries(request, env)
   if (path === '/api/v1/translations' && request.method === 'POST') return apiCreateTranslation(request, env)
   if (path === '/api/v1/translations/batch' && request.method === 'POST') return apiCreateTranslations(request, env)
@@ -309,33 +310,45 @@ async function revokeKey(request, env, id) {
 }
 
 async function listGames(request, env) {
-  const user = await currentUser(request, env)
-  let query = `SELECT g.*,u.login submitter FROM games g LEFT JOIN users u ON u.id=g.submitted_by WHERE g.status='approved'`
-  const binds = []
-  if (user?.role === 'admin') query = 'SELECT g.*,u.login submitter FROM games g LEFT JOIN users u ON u.id=g.submitted_by'
-  else if (user) { query = `SELECT g.*,u.login submitter FROM games g LEFT JOIN users u ON u.id=g.submitted_by WHERE g.status='approved' OR g.submitted_by=?`; binds.push(user.id) }
-  const { results } = await env.DB.prepare(`${query} ORDER BY g.status='approved' DESC,g.created_at DESC`).bind(...binds).all()
+  const { results } = await env.DB.prepare(`SELECT g.*,u.login submitter FROM games g LEFT JOIN users u ON u.id=g.submitted_by
+    WHERE g.status='approved' ORDER BY g.created_at DESC`).all()
   return json({ games: results })
 }
 
 async function submitGame(request, env) {
   const auth = await requireUser(request, env); if (auth.response) return auth.response
-  const body = await readJson(request), japanese = clean(body.japaneseName, 120), chinese = clean(body.chineseName, 120), poster = clean(body.posterUrl, 600)
-  if (!japanese || !chinese || !isHttpsUrl(poster)) return json({ error: '请填写日文名、中文名和有效的 HTTPS 海报 URL' }, 400)
-  const id = `game-${randomToken(10).toLowerCase()}`
-  await env.DB.prepare('INSERT INTO games(id,japanese_name,chinese_name,poster_url,submitted_by) VALUES(?,?,?,?,?)').bind(id, japanese, chinese, poster, auth.user.id).run()
-  return json({ id, status: 'pending' }, 201)
+  const result = await createGame(env, await readJson(request), auth.user)
+  return json(result.body, result.status)
 }
 
-async function moderateGame(request, env, id, status) {
+async function updateGame(request, env, id) {
   const auth = await requireUser(request, env, true); if (auth.response) return auth.response
-  await env.DB.prepare('UPDATE games SET status=?,approved_by=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?').bind(status, auth.user.id, id, 'pending').run()
-  return json({ ok: true })
+  const current = await env.DB.prepare('SELECT id,japanese_name,chinese_name,poster_url FROM games WHERE id=? AND status=?').bind(id, 'approved').first()
+  if (!current) return json({ error: '游戏不存在' }, 404)
+  const body = await readJson(request)
+  const chinese = body.chineseName === undefined ? current.chinese_name : clean(body.chineseName, 120)
+  const japanese = body.japaneseName === undefined ? current.japanese_name : clean(body.japaneseName, 120)
+  const poster = body.posterUrl === undefined ? current.poster_url || '' : clean(body.posterUrl, 600)
+  const validation = validateGameInput(chinese, poster)
+  if (validation) return json({ error: validation }, 400)
+  const duplicate = await env.DB.prepare('SELECT id FROM games WHERE chinese_name=? AND id!=? AND status=?').bind(chinese, id, 'approved').first()
+  if (duplicate) return json({ error: '已存在同名中文游戏' }, 409)
+  await env.DB.prepare(`UPDATE games SET japanese_name=?,chinese_name=?,poster_url=?,approved_by=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=?`).bind(japanese, chinese, poster || null, auth.user.id, id).run()
+  return json({ id, chineseName: chinese, japaneseName: japanese, posterUrl: poster || null, status: 'approved' })
+}
+
+async function deleteGame(request, env, id) {
+  const auth = await requireUser(request, env, true); if (auth.response) return auth.response
+  if (id === 'general') return json({ error: '通用词库不能删除' }, 400)
+  const result = await env.DB.prepare('DELETE FROM games WHERE id=?').bind(id).run()
+  if (!result.meta.changes) return json({ error: '游戏不存在' }, 404)
+  return json({ ok: true, id })
 }
 
 async function listTerms(request, env, gameId) {
   const game = await env.DB.prepare("SELECT id FROM games WHERE id=? AND status='approved'").bind(gameId).first()
-  if (!game) return json({ error: '游戏不存在或尚未批准' }, 404)
+  if (!game) return json({ error: '游戏不存在' }, 404)
   const search = clean(new URL(request.url).searchParams.get('q'), 80)
   const pattern = `%${escapeLike(search)}%`
   const statement = search
@@ -393,6 +406,32 @@ async function apiGames(request, env) {
   return cors(json({ games: results.map((game) => ({ id: game.id, japaneseName: game.japanese_name, chineseName: game.chinese_name, posterUrl: game.poster_url, updatedAt: game.updated_at })) }))
 }
 
+async function apiCreateGame(request, env) {
+  const auth = await apiKeyUser(request, env); if (auth.response) return cors(auth.response)
+  const result = await createGame(env, await readJson(request), auth.user)
+  return cors(json(result.body, result.status))
+}
+
+function validateGameInput(chinese, poster) {
+  if (!chinese) return '游戏中文名为必填项'
+  if (poster && !isHttpsUrl(poster)) return '封面 URL 必须为空或使用有效的 HTTPS 地址'
+  return ''
+}
+
+async function createGame(env, body, user) {
+  const chinese = clean(body?.chineseName, 120)
+  const japanese = clean(body?.japaneseName, 120)
+  const poster = clean(body?.posterUrl, 600)
+  const validation = validateGameInput(chinese, poster)
+  if (validation) return { status: 400, body: { error: validation } }
+  const duplicate = await env.DB.prepare('SELECT id FROM games WHERE chinese_name=? AND status=?').bind(chinese, 'approved').first()
+  if (duplicate) return { status: 409, body: { error: '已存在同名中文游戏', id: duplicate.id } }
+  const id = `game-${randomToken(10).toLowerCase()}`
+  await env.DB.prepare(`INSERT INTO games(id,japanese_name,chinese_name,poster_url,status,submitted_by,approved_by)
+    VALUES(?,?,?,?,?,?,?)`).bind(id, japanese, chinese, poster || null, 'approved', user.id, user.role === 'admin' ? user.id : null).run()
+  return { status: 201, body: { id, chineseName: chinese, japaneseName: japanese, posterUrl: poster || null, status: 'approved' } }
+}
+
 async function apiDictionaries(request, env) {
   const auth = await apiKeyUser(request, env); if (auth.response) return cors(auth.response)
   const body = await readJson(request)
@@ -402,7 +441,7 @@ async function apiDictionaries(request, env) {
   const { results: games } = await env.DB.prepare(`SELECT id,japanese_name,chinese_name FROM games WHERE status='approved' AND id IN (${placeholders})`).bind(...gameIds).all()
   if (games.length !== gameIds.length) {
     const found = new Set(games.map((game) => game.id))
-    return cors(json({ error: '包含不存在或尚未批准的游戏', unknownGameIds: gameIds.filter((id) => !found.has(id)) }, 404))
+    return cors(json({ error: '包含不存在的游戏', unknownGameIds: gameIds.filter((id) => !found.has(id)) }, 404))
   }
   const { results } = await env.DB.prepare(`SELECT t.game_id,t.id term_id,t.source_text,t.kind,tr.id translation_id,tr.target_text,tr.score,tr.updated_at
     FROM terms t JOIN translations tr ON tr.term_id=t.id WHERE t.game_id IN (${placeholders})
@@ -482,7 +521,7 @@ async function createDictionaryEntry(env, body, user, apiKeyId, channel, scoreDe
   if (!gameId || !source || !target || !kind) return { status: 400, body: { error: 'gameId、source、target 和 kind 均为必填项' } }
   if (!isEditableDictionaryItem(source, target)) return { status: 400, body: { error: '词条包含标点、日文译文或长度超限，不能写入词库' } }
   const game = await env.DB.prepare("SELECT id FROM games WHERE id=? AND status='approved'").bind(gameId).first()
-  if (!game) return { status: 404, body: { error: '游戏不存在或尚未批准' } }
+  if (!game) return { status: 404, body: { error: '游戏不存在' } }
   const normalizedSource = normalize(source), normalizedTarget = normalize(target)
   await env.DB.prepare(`INSERT INTO terms(game_id,source_text,normalized_source,kind) VALUES(?,?,?,?)
     ON CONFLICT(game_id,normalized_source) DO UPDATE SET source_text=excluded.source_text,updated_at=CURRENT_TIMESTAMP`).bind(gameId, source, normalizedSource, kind).run()
@@ -499,7 +538,7 @@ async function createDictionaryEntry(env, body, user, apiKeyId, channel, scoreDe
 
 async function dictionary(env, gameId) {
   const game = await env.DB.prepare("SELECT id FROM games WHERE id=? AND status='approved'").bind(gameId).first()
-  if (!game) return cors(json({ error: '游戏不存在或尚未批准' }, 404))
+  if (!game) return cors(json({ error: '游戏不存在' }, 404))
   const { results } = await env.DB.prepare(`SELECT source_text,target_text,kind,score,updated_at FROM (
     SELECT t.source_text,tr.target_text,t.kind,tr.score,tr.updated_at,
     ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY tr.score DESC,tr.updated_at DESC) rank
@@ -528,7 +567,7 @@ async function uploadContributions(request, env) {
       const provenance = ['translategemma', 'wikimedia'].includes(item.provenance) ? item.provenance : 'community'
       if (!gameId || !source || !target) throw new Error('缺少 gameId/source/target')
       if (!kind || !isShareableCommunityItem(source, target, kind, provenance, item.sourceUrl)) throw new Error('仅接受专有名词、单词和简短菜单标签')
-      const game = await env.DB.prepare("SELECT id FROM games WHERE id=? AND status='approved'").bind(gameId).first(); if (!game) throw new Error('游戏不存在或尚未批准')
+      const game = await env.DB.prepare("SELECT id FROM games WHERE id=? AND status='approved'").bind(gameId).first(); if (!game) throw new Error('游戏不存在')
       await env.DB.prepare(`INSERT INTO terms(game_id,source_text,normalized_source,kind) VALUES(?,?,?,?)
         ON CONFLICT(game_id,normalized_source) DO UPDATE SET source_text=excluded.source_text,kind=excluded.kind,updated_at=CURRENT_TIMESTAMP`).bind(gameId, source, normalize(source), kind).run()
       const term = await env.DB.prepare('SELECT id FROM terms WHERE game_id=? AND normalized_source=?').bind(gameId, normalize(source)).first()
@@ -567,7 +606,7 @@ function secureAsset(response) {
   next.headers.set('content-security-policy', "default-src 'self'; img-src 'self' https: data:; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com")
   return next
 }
-function cors(response) { response.headers.set('access-control-allow-origin', '*'); response.headers.set('access-control-allow-headers', 'authorization,content-type'); response.headers.set('access-control-allow-methods', 'GET,POST,PATCH,OPTIONS'); return response }
+function cors(response) { response.headers.set('access-control-allow-origin', '*'); response.headers.set('access-control-allow-headers', 'authorization,content-type'); response.headers.set('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS'); return response }
 function json(body, status = 200) { return new Response(JSON.stringify(body), { status, headers: jsonHeaders }) }
 async function readJson(request) { try { return await request.json() } catch { return {} } }
 function clean(value, max) { return typeof value === 'string' ? value.trim().slice(0, max) : '' }

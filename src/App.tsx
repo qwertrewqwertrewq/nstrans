@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Activity, Camera, Cast, ChevronDown, Expand, Gauge, KeyRound, Languages, LayoutGrid, LoaderCircle, Maximize, Pause, Play, RefreshCw, RotateCcw, ScanText, Settings2, Sparkles, Unplug, Video, Wifi } from 'lucide-react'
+import { Activity, Camera, Cast, ChevronDown, Expand, Gauge, KeyRound, Languages, LayoutGrid, LoaderCircle, Maximize, Moon, Pause, Play, RefreshCw, RotateCcw, ScanText, Search, Sparkles, Sun, Unplug, Video, Volume2, VolumeX, WandSparkles, Wifi } from 'lucide-react'
 import './App.css'
 import { DialogueStabilizer } from './services/dialogueStabilizer'
 import { RecursiveTranslationReuse } from './services/recursiveTranslationReuse'
@@ -9,10 +9,10 @@ import { getTranslateGemmaBackend, installTranslateGemma, installTranslateGemmaF
 import { ConfigurableEntityLookup, EntityLearningQueue } from './services/entityLookup'
 import { browserTranslationMemory } from './services/translationMemory'
 import { browserDictionaryPacks, HttpDictionaryDistributionProvider } from './services/dictionaryPacks'
-import { browserContributionQueue, CommunityDictionaryEditor, HttpContributionUploader, loadCommunityApiKey, saveCommunityApiKey } from './services/knowledgeSharing'
+import { browserContributionQueue, CommunityDictionaryEditor, CommunityGameCatalogClient, HttpContributionUploader, loadCommunityApiKey, saveCommunityApiKey } from './services/knowledgeSharing'
 import { translationOverlayLayout, TranslationMarqueeLocks, translationMarqueeDurationMs } from './services/translationMarquee'
-import { gameOptions, getGameProfile } from './gameAdapters/registry'
-import type { GameId } from './gameAdapters/types'
+import { gameOptions, getGameProfile, loadCommunityGameProfiles, saveCommunityGameProfiles } from './gameAdapters/registry'
+import type { GameId, GameProfile } from './gameAdapters/types'
 import { PresentationToolbar } from './components/PresentationToolbar'
 import { SelectionOverlay } from './components/SelectionOverlay'
 import { offsetTextRegions, selectionCanvasRect, type NormalizedSelection } from './services/presentationGeometry'
@@ -27,7 +27,8 @@ import { cropOcrRegionDataUrl } from './services/visionCrop'
 import { TerminologyInspector } from './components/TerminologyInspector'
 import { RemoteModelManager } from './components/RemoteModelManager'
 import { buildTvImagePayload, buildTvTextPayload, connectTv, disconnectTv, listTvDevices, pushTvOverlay, tvConnectionStatus, type TvCastMode, type TvConnectionStatus, type TvDevice } from './services/tvCast'
-import { openPreferredVideoStream, waitForVideoDimensions } from './services/mediaCapture'
+import { findCaptureAudioDevice, openPreferredVideoStream, waitForVideoDimensions, type CaptureDeviceDescriptor } from './services/mediaCapture'
+import { SetupWizard } from './components/SetupWizard'
 
 const emptyLatency: LatencySample = {
   capture: 0,
@@ -44,22 +45,31 @@ type FrameProcessOptions = {
   selectionOverride?: NormalizedSelection | null
   resetContext?: boolean
 }
-type VideoInputDevice = { id: string; label: string; source: 'media' | 'usb' }
-type OptionalPanel = 'results' | 'logs' | 'ocr' | 'translation' | 'remote' | 'overlay'
+type VideoInputDevice = { id: string; label: string; groupId?: string; source: 'media' | 'usb' }
+type OptionalPanel = 'wizard' | 'results' | 'logs' | 'tv' | 'ocr' | 'translation' | 'search' | 'keys' | 'overlay'
 const optionalPanelLabels: Record<OptionalPanel, string> = {
+  wizard: '设置向导',
   results: '实时结果与专业名词',
   logs: '运行日志',
+  tv: '电视字幕输出',
   ocr: 'OCR 识别',
   translation: '翻译与词库',
-  remote: '密钥与远程管理',
+  search: '名词搜索',
+  keys: '密钥管理',
   overlay: '画面替换',
 }
 const optionalPanelIds = Object.keys(optionalPanelLabels) as OptionalPanel[]
-const panelVisibilityStorageKey = 'nstrans.visible-panels.v1'
+const activePanelStorageKey = 'nstrans.active-panel.v2'
+const captureAudioStorageKey = 'nstrans.capture-audio-enabled.v1'
+const uiThemeStorageKey = 'nstrans.ui-theme.v1'
+const setupWizardCompletedStorageKey = 'nstrans.setup-wizard-completed.v1'
 const routingModeStorageKey = 'nstrans.translation-routing.v1'
 const tvCastModeStorageKey = 'nstrans.tv-cast-mode.v1'
 const tvCastAddressStorageKey = 'nstrans.tv-cast-address.v1'
 const localRuntimeBundled = import.meta.env.VITE_NSTRANS_REMOTE_ONLY !== '1'
+const setupWizardCompleted = () => {
+  try { return localStorage.getItem(setupWizardCompletedStorageKey) === '1' } catch { return false }
+}
 function errorMessage(reason: unknown, fallback: string) {
   if (reason instanceof Error && reason.message) return reason.message
   if (typeof reason === 'string' && reason.trim()) return reason
@@ -132,12 +142,14 @@ function App() {
   const [clientPlatform, setClientPlatform] = useState(() => detectClientPlatform())
   const mobileClient = clientPlatform === 'android' || clientPlatform === 'ios'
   const videoRef = useRef<HTMLVideoElement>(null),
+    audioRef = useRef<HTMLAudioElement>(null),
     usbDisplayRef = useRef<HTMLCanvasElement>(null),
     canvasRef = useRef<HTMLCanvasElement>(null),
     selectionCanvasRef = useRef<HTMLCanvasElement>(null),
     stageRef = useRef<HTMLDivElement>(null)
   const busyRef = useRef(false)
   const autoCameraAuthorizationStartedRef = useRef(false)
+  const audioAuthorizationGrantedRef = useRef(false)
   const pendingFrameRef = useRef<FrameProcessOptions | null>(null)
   const processFrameRef = useRef<(options?: FrameProcessOptions) => Promise<void>>(async () => {})
   const nativeFullscreenOwnedRef = useRef(false)
@@ -151,11 +163,17 @@ function App() {
   const latestVisibleRegionsRef = useRef<TextRegion[]>([])
   const [devices, setDevices] = useState<VideoInputDevice[]>([]),
     [deviceId, setDeviceId] = useState('')
+  const [audioDevices, setAudioDevices] = useState<CaptureDeviceDescriptor[]>([]),
+    [audioDeviceId, setAudioDeviceId] = useState('')
   const [devicePermission, setDevicePermission] = useState<'unknown' | 'granted' | 'denied'>('unknown'),
     [scanning, setScanning] = useState(false)
   const [stream, setStream] = useState<MediaStream | null>(null),
+    [audioStream, setAudioStream] = useState<MediaStream | null>(null),
     [running, setRunning] = useState(false),
     [error, setError] = useState('')
+  const [captureAudioEnabled, setCaptureAudioEnabled] = useState(() => localStorage.getItem(captureAudioStorageKey) !== '0')
+  const [uiTheme, setUiTheme] = useState<'dark' | 'light'>(() => localStorage.getItem(uiThemeStorageKey) === 'dark' ? 'dark' : 'light')
+  const [captureAudioStatus, setCaptureAudioStatus] = useState('自动匹配采集卡音频')
   const [usbInput, setUsbInput] = useState<{ active: boolean; label: string }>({
     active: false,
     label: '',
@@ -203,12 +221,18 @@ function App() {
         const machineTranslationProvider: MachineTranslationProvider = savedProvider === 'google-web' || savedProvider === 'youdao-web' || savedProvider === 'bing-web' || savedProvider === 'deepl-web' || (localRuntimeBundled && savedProvider === 'nllb-600m')
           ? savedProvider
           : 'youdao-web'
-        return { translationStrategy: saved.translationStrategy === 'direct' ? 'direct' as const : 'knowledge-assisted' as const, coreTranslationEngine, machineTranslationProvider }
+        return {
+          translationStrategy: saved.translationStrategy === 'direct' ? 'direct' as const : 'knowledge-assisted' as const,
+          coreTranslationEngine,
+          machineTranslationProvider,
+          entityLookupEnabled: saved.entityLookupEnabled !== false,
+          gameId: typeof saved.gameId === 'string' && saved.gameId ? saved.gameId : defaultRoutingSettings.gameId,
+        }
       } catch { return { coreTranslationEngine: localRuntimeBundled ? 'local' as const : 'remote' as const, machineTranslationProvider: 'youdao-web' as const } }
     })(),
     entitySearch: loadEntitySearchSettings(),
   }))
-  const [runtimeStatus, setRuntimeStatus] = useState<Record<TranslationEngineId, boolean>>({ translategemma: false, 'remote-llm': true, 'nllb-600m': localRuntimeBundled, 'web-machine': true })
+  const [runtimeStatus, setRuntimeStatus] = useState<Record<TranslationEngineId, boolean>>({ translategemma: false, 'remote-llm': true, 'nllb-600m': false, 'web-machine': true })
   const [llamaBackend, setLlamaBackend] = useState<LlamaBackend>('cpu')
   const [knowledgeStats, setKnowledgeStats] = useState({
     translations: 0,
@@ -219,6 +243,7 @@ function App() {
     [sharingPending, setSharingPending] = useState(knowledgeServices.contributions.pendingCount())
   const [communityApiKey, setCommunityApiKey] = useState(loadCommunityApiKey()),
     [dictionaryStatus, setDictionaryStatus] = useState(() => knowledgeServices.dictionaries.status(defaultRoutingSettings.gameId))
+  const [communityGameProfiles, setCommunityGameProfiles] = useState<GameProfile[]>(loadCommunityGameProfiles)
   const [dictionaryReady, setDictionaryReady] = useState(false)
   const [communityStatus, setCommunityStatus] = useState('')
   const [, setTerminologyRevision] = useState(0)
@@ -254,34 +279,28 @@ function App() {
   const [tvConnectionBusy, setTvConnectionBusy] = useState(false)
   const [tvConnectionMessage, setTvConnectionMessage] = useState('正在发现同一局域网内的电视客户端…')
   const [expandedPreview, setExpandedPreview] = useState(false),
-    [fullscreenPreview, setFullscreenPreview] = useState(mobileClient),
+    [fullscreenPreview, setFullscreenPreview] = useState(() => mobileClient && setupWizardCompleted()),
     [playbackPaused, setPlaybackPaused] = useState(false)
   const [selectingRegion, setSelectingRegion] = useState(false),
     [captureSelection, setCaptureSelection] = useState<NormalizedSelection | null>(null)
   const [diagnosticLogs, setDiagnosticLogs] = useState<DiagnosticLogEntry[]>(diagnosticLogEntries)
-  const [visiblePanels, setVisiblePanels] = useState<Set<OptionalPanel>>(() => {
+  const [activePanel, setActivePanel] = useState<OptionalPanel>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(panelVisibilityStorageKey) ?? 'null')
-      return Array.isArray(saved) ? new Set(saved.filter((id): id is OptionalPanel => optionalPanelIds.includes(id))) : new Set(optionalPanelIds)
+      if (!setupWizardCompleted()) return 'wizard'
+      const saved = localStorage.getItem(activePanelStorageKey)
+      if (saved === 'remote') return 'search'
+      return saved && optionalPanelIds.includes(saved as OptionalPanel) ? saved as OptionalPanel : 'results'
     } catch {
-      return new Set(optionalPanelIds)
+      return 'results'
     }
   })
   const diagnosticLogRef = useRef<HTMLDivElement>(null)
   const inputActive = Boolean(stream) || usbInput.active
 
-  const togglePanel = (id: OptionalPanel) =>
-    setVisiblePanels((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      try {
-        localStorage.setItem(panelVisibilityStorageKey, JSON.stringify([...next]))
-      } catch {
-        /* Keep the current session layout. */
-      }
-      return next
-    })
+  const selectPanel = (id: OptionalPanel) => {
+    setActivePanel(id)
+    try { localStorage.setItem(activePanelStorageKey, id) } catch { /* Keep the current session selection. */ }
+  }
 
   useEffect(() => {
     if (!isTauri()) return
@@ -291,15 +310,22 @@ function App() {
   }, [])
 
   const refreshDevices = useCallback(async () => {
-    const mediaInputs = navigator.mediaDevices
-      ? (await navigator.mediaDevices.enumerateDevices())
+    const enumerated = navigator.mediaDevices ? await navigator.mediaDevices.enumerateDevices() : []
+    const mediaInputs = enumerated
           .filter((device) => device.kind === 'videoinput')
           .map((device, index) => ({
             id: device.deviceId,
             label: device.label || `未授权视频设备 ${index + 1}`,
+            groupId: device.groupId,
             source: 'media' as const,
           }))
-      : []
+    const nextAudioDevices = enumerated
+      .filter((device) => device.kind === 'audioinput')
+      .map((device, index) => ({
+        deviceId: device.deviceId,
+        groupId: device.groupId,
+        label: device.label || `未授权音频设备 ${index + 1}`,
+      }))
     const usbInputs = mobileClient
       ? await listUsbVideoDevices().catch((reason) => {
           writeDiagnosticLog('系统', 'USB UVC 枚举失败', errorMessage(reason, '无法读取 USB 视频设备'), 'warning')
@@ -311,11 +337,14 @@ function App() {
       ...usbInputs.map((device) => ({
         id: `usb:${device.id}`,
         label: `${device.label} · USB UVC`,
+        groupId: undefined,
         source: 'usb' as const,
       })),
       ...mediaInputs.filter((device) => !nativeLabels.has(device.label.trim().toLocaleLowerCase())),
     ]
     setDevices(inputs)
+    setAudioDevices(nextAudioDevices)
+    setAudioDeviceId((current) => current && nextAudioDevices.some((device) => device.deviceId === current) ? current : '')
     // USB enumeration does not mean the mobile camera permission is granted.
     // Android requires a separate UVC grant; iPadOS uses AVFoundation access.
     // can receive its separate per-device USB authorization.
@@ -337,6 +366,10 @@ function App() {
     return () => window.clearInterval(timer)
   }, [mobileClient, inputActive, refreshDevices])
   useEffect(() => subscribeDiagnosticLog((entry) => setDiagnosticLogs((current) => [...current, entry].slice(-300))), [])
+  useEffect(() => {
+    document.documentElement.dataset.theme = uiTheme
+    localStorage.setItem(uiThemeStorageKey, uiTheme)
+  }, [uiTheme])
   useEffect(() => {
     if (!isTauri()) return
     let active = true
@@ -361,6 +394,11 @@ function App() {
   }, [diagnosticLogs])
   useEffect(() => {
     if (!mobileClient) return
+    if (!setupWizardCompleted()) {
+      // Keep the control surface visible for the required first-run wizard.
+      // The existing mobile fullscreen behavior resumes after completion and restart.
+      return
+    }
     writeDiagnosticLog('系统', `${clientPlatform === 'ios' ? 'iPad' : 'Android'} 展示模式`, '启动时默认进入画面全屏并显示悬浮工具条', 'success')
     // Native platform detection may finish after the first React render.
     // oxlint-disable-next-line react/set-state-in-effect
@@ -387,6 +425,38 @@ function App() {
     setKnowledgeStats(routerRef.current.getKnowledgeState())
     setSharingPending(knowledgeServices.contributions.pendingCount())
   }, [knowledgeServices])
+  useEffect(() => {
+    const key = communityApiKey.trim()
+    if (!sharingEnabled || !key || !sharingPending) return
+    const timer = window.setTimeout(() => {
+      void knowledgeServices.contributions
+        .flush(new HttpContributionUploader(communityOrigin, key))
+        .then((uploaded) => {
+          setSharingPending(knowledgeServices.contributions.pendingCount())
+          setCommunityStatus(uploaded ? `已自动上传 ${uploaded} 条贡献` : '共享已开启，新贡献将自动上传')
+        })
+        .catch(() => setCommunityStatus('自动上传失败，请检查社区 API Key 或网络'))
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [communityApiKey, knowledgeServices, sharingEnabled, sharingPending])
+  useEffect(() => {
+    const key = communityApiKey.trim()
+    if (key.length < 20) return
+    let active = true
+    const timer = window.setTimeout(() => {
+      void new CommunityGameCatalogClient(communityOrigin, key).list()
+        .then((profiles) => {
+          if (!active) return
+          saveCommunityGameProfiles(profiles)
+          setCommunityGameProfiles(profiles)
+        })
+        .catch(() => undefined)
+    }, 500)
+    return () => {
+      active = false
+      window.clearTimeout(timer)
+    }
+  }, [communityApiKey])
   useEffect(() => {
     if (clientPlatform !== 'windows') return
     void getTranslateGemmaBackend()
@@ -471,6 +541,20 @@ function App() {
           video: true,
           audio: false,
         }))
+      // Permission discovery is independent from the playback preference. A user
+      // may keep capture audio muted and enable it later without restarting the
+      // app or losing the capture-card audio endpoint from the device list.
+      if (!audioAuthorizationGrantedRef.current) {
+        try {
+          const audioPermissionStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+          audioPermissionStream.getTracks().forEach((track) => track.stop())
+          audioAuthorizationGrantedRef.current = true
+        } catch (reason) {
+          const message = errorMessage(reason, '麦克风权限被拒绝，请在系统设置中允许 NSTrans 访问麦克风。')
+          setCaptureAudioStatus(message)
+          writeDiagnosticLog('音频', '麦克风权限未授予', message, 'warning')
+        }
+      }
       await refreshDevices()
       if (!stream) permissionStream.getTracks().forEach((track) => track.stop())
       setDevicePermission('granted')
@@ -488,9 +572,72 @@ function App() {
     void authorizeAndScan()
   }, [authorizeAndScan, clientPlatform, devicePermission])
 
+  const stopCaptureAudio = useCallback(() => {
+    audioStream?.getTracks().forEach((track) => track.stop())
+    if (audioRef.current) audioRef.current.srcObject = null
+    setAudioStream(null)
+  }, [audioStream])
+
+  const startCaptureAudio = useCallback(async (requestedVideoId: string, videoLabel: string, enabled = captureAudioEnabled, preferredAudioId = audioDeviceId) => {
+    stopCaptureAudio()
+    if (!enabled || !navigator.mediaDevices) {
+      setCaptureAudioStatus(enabled ? '当前环境不支持音频采集' : '采集卡音频已关闭')
+      return
+    }
+    try {
+      // Audio permission is independent from camera permission on macOS. Ask once
+      // before enumerating so capture-card audio endpoints expose their labels and
+      // group IDs even when the browser already knows about another microphone.
+      if (!audioAuthorizationGrantedRef.current) {
+        const permission = await navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+        permission.getTracks().forEach((track) => track.stop())
+        audioAuthorizationGrantedRef.current = true
+      }
+      const enumerated = await navigator.mediaDevices.enumerateDevices()
+      const inputs = enumerated.filter((device) => device.kind === 'audioinput')
+      const descriptors = inputs.map((device, index) => ({
+        deviceId: device.deviceId,
+        groupId: device.groupId,
+        label: device.label || `音频设备 ${index + 1}`,
+      }))
+      setAudioDevices(descriptors)
+      const freshVideo = enumerated.find((device) => device.kind === 'videoinput' && device.deviceId === requestedVideoId)
+      const selected = descriptors.find((device) => device.deviceId === preferredAudioId)
+        ?? findCaptureAudioDevice({ deviceId: requestedVideoId, groupId: freshVideo?.groupId, label: freshVideo?.label || videoLabel }, descriptors)
+      if (!selected) {
+        setCaptureAudioStatus('未自动找到采集卡音频，请从列表手动选择')
+        writeDiagnosticLog('音频', '未找到采集卡音频', `${videoLabel} · 已排除内置麦克风`, 'warning')
+        return
+      }
+      const nextAudio = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: {
+          deviceId: { exact: selected.deviceId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      })
+      setAudioStream(nextAudio)
+      setAudioDeviceId(selected.deviceId)
+      if (audioRef.current) {
+        audioRef.current.srcObject = nextAudio
+        audioRef.current.volume = 1
+        await audioRef.current.play()
+      }
+      setCaptureAudioStatus(`正在输出 · ${selected.label}`)
+      writeDiagnosticLog('音频', '采集卡音频输出已启用', selected.label, 'success')
+    } catch (reason) {
+      const message = errorMessage(reason, '无法打开采集卡音频')
+      setCaptureAudioStatus(message)
+      writeDiagnosticLog('音频', '采集卡音频输出失败', message, 'warning')
+    }
+  }, [audioDeviceId, captureAudioEnabled, stopCaptureAudio])
+
   const stopInput = useCallback(async () => {
     if (stream || usbInput.active) writeDiagnosticLog('OCR', '输入源已断开', stream?.getVideoTracks()[0]?.label || usbInput.label || '视频设备', 'warning')
     stream?.getTracks().forEach((track) => track.stop())
+    stopCaptureAudio()
     if (usbInput.active) await closeUsbVideoDevice().catch(() => undefined)
     const usbDisplay = usbDisplayRef.current
     if (usbDisplay) usbDisplay.getContext('2d')?.clearRect(0, 0, usbDisplay.width, usbDisplay.height)
@@ -506,7 +653,7 @@ function App() {
     setSelectingRegion(false)
     setCaptureSelection(null)
     setRegions([])
-  }, [stream, usbInput])
+  }, [stopCaptureAudio, stream, usbInput])
   const startInput = useCallback(
     async (requestedDeviceId = deviceId) => {
       setError('')
@@ -525,6 +672,7 @@ function App() {
           setRunning(true)
           setDevicePermission('granted')
           writeDiagnosticLog('OCR', 'USB UVC 输入已打开', `${result.label} · ${result.width} × ${result.height}`, 'success')
+          void startCaptureAudio(requestedDeviceId, result.label)
           return
         }
         if (!navigator.mediaDevices) throw new Error('当前环境不支持摄像头或采集卡访问')
@@ -547,19 +695,21 @@ function App() {
         setDevicePermission('granted')
         await refreshDevices()
         writeDiagnosticLog('OCR', 'OCR 启动', `${track?.label || '视频设备'} · ${sourceWidth} × ${sourceHeight} · ${ocr.scanMode} · ${ocr.language}`, 'success')
+        void startCaptureAudio(requestedDeviceId, track?.label || '视频设备')
       } catch (reason) {
         const message = errorMessage(reason, '无法打开输入源')
         setError(message)
         writeDiagnosticLog('系统', '输入源打开失败', message, 'error')
       }
     },
-    [deviceId, ocr.language, ocr.scanMode, refreshDevices, stopInput, syncMediaFrameSize],
+    [deviceId, ocr.language, ocr.scanMode, refreshDevices, startCaptureAudio, stopInput, syncMediaFrameSize],
   )
   useEffect(
     () => () => {
       stream?.getTracks().forEach((track) => track.stop())
+      audioStream?.getTracks().forEach((track) => track.stop())
     },
-    [stream],
+    [audioStream, stream],
   )
   useEffect(
     () => () => {
@@ -865,14 +1015,6 @@ function App() {
         setKnowledgeStats(routerRef.current.getKnowledgeState())
         const pendingContributions = knowledgeServices.contributions.pendingCount()
         setSharingPending(pendingContributions)
-        if (sharingEnabled && communityApiKey && pendingContributions)
-          void knowledgeServices.contributions
-            .flush(new HttpContributionUploader(communityOrigin, communityApiKey))
-            .then(() => {
-              setSharingPending(knowledgeServices.contributions.pendingCount())
-              setCommunityStatus('社区贡献已上传')
-            })
-            .catch(() => setCommunityStatus('贡献上传失败，请检查 API Key 或网络'))
         const renderStart = performance.now()
         setRegions(translated)
         requestAnimationFrame(() => {
@@ -896,7 +1038,7 @@ function App() {
         if (pending) queueMicrotask(() => void processFrameRef.current(pending))
       }
     },
-    [captureSelection, communityApiKey, dictionaryReady, knowledgeServices, ocr.confidence, ocr.engine, ocr.language, ocr.scanMode, overlay.fontScale, playbackPaused, routing, sharingEnabled, usbInput.active],
+    [captureSelection, dictionaryReady, knowledgeServices, ocr.confidence, ocr.engine, ocr.language, ocr.scanMode, overlay.fontScale, playbackPaused, routing, usbInput.active],
   )
   useEffect(() => {
     processFrameRef.current = processFrame
@@ -1066,8 +1208,23 @@ function App() {
     routing.gameId,
   )
   const selectedGame = getGameProfile(routing.gameId)
+  const availableGames = useMemo(
+    () => [...new Map([...gameOptions, ...communityGameProfiles].map((game) => [game.id, game])).values()],
+    [communityGameProfiles],
+  )
   const effectiveSearchKeywords = useMemo(() => resolveSearchKeywords(routing.entitySearch, selectedGame.searchNames), [routing.entitySearch, selectedGame.searchNames])
   const presentationMode = expandedPreview || fullscreenPreview
+  const persistRoutingPreferences = (next: TranslationRoutingSettings) => {
+    try {
+      localStorage.setItem(routingModeStorageKey, JSON.stringify({
+        translationStrategy: next.translationStrategy,
+        coreTranslationEngine: next.coreTranslationEngine,
+        machineTranslationProvider: next.machineTranslationProvider,
+        entityLookupEnabled: next.entityLookupEnabled,
+        gameId: next.gameId,
+      }))
+    } catch { /* Session selection remains active. */ }
+  }
   const selectGame = (gameId: GameId) => {
     setDictionaryReady(false)
     routerRef.current.resetContext()
@@ -1077,13 +1234,25 @@ function App() {
     translationRetryRef.current.clear()
     setRegions([])
     setContextTurns(0)
-    setRouting((current) => ({ ...current, gameId }))
+    setRouting((current) => {
+      const next = { ...current, gameId }
+      persistRoutingPreferences(next)
+      return next
+    })
   }
-  const toggleKnowledgeSharing = () => {
-    const enabled = !sharingEnabled
+  const setKnowledgeSharing = (enabled: boolean) => {
     knowledgeServices.contributions.setEnabled(enabled)
     setSharingEnabled(enabled)
     setSharingPending(knowledgeServices.contributions.pendingCount())
+    setCommunityStatus(enabled
+      ? communityApiKey.trim() ? '共享已开启，新贡献将自动上传' : '共享已开启，请在“密钥管理”填写社区 API Key'
+      : '共享已关闭；本地词库不会上传')
+  }
+  const toggleKnowledgeSharing = () => setKnowledgeSharing(!sharingEnabled)
+  const updateCommunityApiKey = (value: string) => {
+    setCommunityApiKey(value)
+    saveCommunityApiKey(value.trim())
+    setCommunityStatus(value.trim() ? '社区 API Key 已保存；开启共享后将自动上传' : '社区 API Key 已清除')
   }
   const updateEntitySearch = (patch: Partial<TranslationRoutingSettings['entitySearch']>) =>
     setRouting((current) => {
@@ -1092,12 +1261,25 @@ function App() {
       saveEntitySearchSettings(entitySearch)
       return { ...current, entitySearch }
     })
+  const setEntityLookupEnabled = (enabled: boolean) => setRouting((current) => {
+    const next = { ...current, entityLookupEnabled: enabled }
+    persistRoutingPreferences(next)
+    return next
+  })
   const updateRoutingMode = (patch: Partial<Pick<TranslationRoutingSettings, 'translationStrategy' | 'coreTranslationEngine' | 'machineTranslationProvider'>>) => setRouting((current) => {
     const next = { ...current, ...patch }
     routerRef.current.resetContext(); setContextTurns(0)
-    try { localStorage.setItem(routingModeStorageKey, JSON.stringify({ translationStrategy: next.translationStrategy, coreTranslationEngine: next.coreTranslationEngine, machineTranslationProvider: next.machineTranslationProvider })) } catch { /* Session selection remains active. */ }
+    persistRoutingPreferences(next)
     return next
   })
+  const createCommunityGameProfile = async (input: { chineseName: string; japaneseName?: string; posterUrl?: string }) => {
+    const profile = await new CommunityGameCatalogClient(communityOrigin, communityApiKey).create(input)
+    const profiles = [...new Map([...communityGameProfiles, profile].map((game) => [game.id, game])).values()]
+    saveCommunityGameProfiles(profiles)
+    setCommunityGameProfiles(profiles)
+    selectGame(profile.id)
+    setCommunityStatus(`社区游戏“${profile.label}”已创建并开放`)
+  }
   const downloadNllb = async () => {
     setNllbPreparing(true)
     setNllbStatus('正在初始化 NLLB-600M…')
@@ -1111,26 +1293,12 @@ function App() {
         setNllbStatus(`${action} ${item.file ?? '模型'}${percent}`)
       })
       setNllbStatus('NLLB-600M 已就绪，模型已写入本机缓存')
+      setRuntimeStatus((current) => ({ ...current, 'nllb-600m': true }))
     } catch (reason) {
+      setRuntimeStatus((current) => ({ ...current, 'nllb-600m': false }))
       setNllbStatus(errorMessage(reason, 'NLLB-600M 初始化失败'))
     } finally {
       setNllbPreparing(false)
-    }
-  }
-  const saveApiKeyAndUpload = async () => {
-    const key = communityApiKey.trim()
-    saveCommunityApiKey(key)
-    setCommunityApiKey(key)
-    if (!key) {
-      setCommunityStatus('客户端 API Key 已清除')
-      return
-    }
-    try {
-      const uploaded = await knowledgeServices.contributions.flush(new HttpContributionUploader(communityOrigin, key))
-      setSharingPending(knowledgeServices.contributions.pendingCount())
-      setCommunityStatus(uploaded ? `已上传 ${uploaded} 条贡献` : 'API Key 已保存')
-    } catch {
-      setCommunityStatus('Key 无效或服务器暂时不可用')
     }
   }
   const editTerminology = async (item: TerminologyItem, source: string, target: string) => {
@@ -1256,25 +1424,7 @@ function App() {
   }
 
   return (
-    <main className={`app-shell ${mobileClient ? 'android-client' : ''} ${clientPlatform === 'ios' ? 'ios-client' : ''} ${expandedPreview ? 'preview-expanded' : ''} ${fullscreenPreview ? 'preview-fullscreen' : ''}`}>
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">
-            <img src="/logo.png" alt="NSTrans" className="brand-logo" />
-          </span>
-          <span>NSTrans</span>
-          <small>LIVE OCR</small>
-        </div>
-        <div className="top-status">
-          <span className={`status-dot ${running ? 'live' : ''}`} />
-          {running ? '实时处理中' : '待机'}
-          <span className="divider" />
-          日本語 → 简体中文
-        </div>
-        <button className="icon-button" title="设置">
-          <Settings2 size={18} />
-        </button>
-      </header>
+    <main className={`app-shell theme-${uiTheme} ${mobileClient ? 'android-client' : ''} ${clientPlatform === 'ios' ? 'ios-client' : ''} ${expandedPreview ? 'preview-expanded' : ''} ${fullscreenPreview ? 'preview-fullscreen' : ''}`}>
       <section className="workspace">
         <div className="preview-column">
           <div className="preview-card panel">
@@ -1302,6 +1452,7 @@ function App() {
                 onLoadedMetadata={(event) => syncMediaFrameSize(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
                 onResize={(event) => syncMediaFrameSize(event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
               />
+              <audio ref={audioRef} autoPlay hidden />
               {usbInput.active && <canvas ref={usbDisplayRef} className="usb-video-frame" role="img" aria-label="USB 采集卡实时画面" />}
               <canvas ref={canvasRef} hidden />
               <canvas ref={selectionCanvasRef} hidden />
@@ -1382,6 +1533,52 @@ function App() {
               </select>
               <ChevronDown size={15} />
             </div>
+            <div className="capture-audio-control">
+              <div className="toggle-row">
+                <div>
+                  <strong>采集卡音频输出</strong>
+                  <small>{captureAudioStatus}</small>
+                </div>
+                <button
+                  className={`toggle ${captureAudioEnabled ? 'on' : ''}`}
+                  aria-label="启用采集卡音频输出"
+                  onClick={() => {
+                    const enabled = !captureAudioEnabled
+                    setCaptureAudioEnabled(enabled)
+                    localStorage.setItem(captureAudioStorageKey, enabled ? '1' : '0')
+                    if (!enabled) {
+                      stopCaptureAudio()
+                      setCaptureAudioStatus('采集卡音频已关闭')
+                    } else if (inputActive) {
+                      const selectedVideo = devices.find((device) => device.id === deviceId)
+                      void startCaptureAudio(deviceId, selectedVideo?.label || usbInput.label || '视频设备', true)
+                    }
+                  }}
+                >
+                  <span />
+                </button>
+              </div>
+              {captureAudioEnabled && (
+                <div className="select-wrap audio-source-select">
+                  <select
+                    value={audioDeviceId}
+                    aria-label="采集卡音频输入设备"
+                    onChange={(event) => {
+                      const nextAudioId = event.target.value
+                      setAudioDeviceId(nextAudioId)
+                      if (inputActive) {
+                        const selectedVideo = devices.find((device) => device.id === deviceId)
+                        void startCaptureAudio(deviceId, selectedVideo?.label || usbInput.label || '视频设备', true, nextAudioId)
+                      }
+                    }}
+                  >
+                    <option value="">自动匹配采集卡音频</option>
+                    {audioDevices.map((device) => <option value={device.deviceId} key={device.deviceId}>{device.label}</option>)}
+                  </select>
+                  {audioStream ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                </div>
+              )}
+            </div>
             {devicePermission !== 'granted' && !devices.some((device) => device.source === 'usb') && (
               <button className="scan-button" onClick={() => void authorizeAndScan()} disabled={scanning}>
                 {scanning ? <LoaderCircle className="spin" size={15} /> : <Camera size={15} />}
@@ -1425,35 +1622,6 @@ function App() {
                 断开当前输入源
               </button>
             )}
-            <div className="tv-cast-control">
-              <div className="latency-title">
-                <Cast size={15} />
-                <strong>电视字幕输出</strong>
-                <span className={`tv-connection-dot ${tvConnection.connected ? 'connected' : ''}`} />
-              </div>
-              <div className="segmented">
-                <button className={tvCastMode === 'text' ? 'active' : ''} onClick={() => selectTvCastMode('text')}>文本传输</button>
-                <button className={tvCastMode === 'image' ? 'active' : ''} onClick={() => selectTvCastMode('image')}>图片图层</button>
-              </div>
-              <small className="muted">文本模式由电视端按当前字体、透明度和滚动参数绘制；图片模式发送透明 PNG，连接期间本机同步隐藏字幕层。</small>
-              {tvDevices.length > 0 && (
-                <div className="tv-device-list">
-                  {tvDevices.map((device) => (
-                    <button key={device.id} className="tv-device" disabled={tvConnectionBusy} onClick={() => void connectTelevision(`${device.address}:${device.port}`)}>
-                      <Wifi size={14} />
-                      <span><strong>{device.name}</strong><small>{device.address}:{device.port}</small></span>
-                      <i>连接</i>
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="tv-address-row">
-                <input value={tvAddress} onChange={(event) => setTvAddress(event.target.value)} placeholder="电视 IP，例如 192.168.1.80" aria-label="电视客户端 IP 地址" />
-                <button className="secondary" disabled={tvConnectionBusy} onClick={() => void connectTelevision()}>{tvConnectionBusy ? <LoaderCircle className="spin" size={14} /> : <Cast size={14} />}握手</button>
-              </div>
-              <div className={`notice ${tvConnection.connected ? 'success' : ''}`}>{tvConnectionMessage}</div>
-              {tvConnection.connected && <button className="text-button" onClick={() => void disconnectTelevision()}><Unplug size={14} />断开电视输出</button>}
-            </div>
             <div className="inline-latency">
               <div className="latency-title">
                 <Gauge size={15} />
@@ -1472,17 +1640,60 @@ function App() {
           </ControlPanel>
         </div>
         <div className="control-grid">
-          <ControlPanel className="wide panel-visibility" title="展示面板" icon={<LayoutGrid size={16} />} action={<span className="subtle-stat">默认全部展示 · 自动保存布局</span>}>
-            <div className="panel-checkboxes">
+          <nav className="module-tabs" aria-label="控制模块">
+            <span><LayoutGrid size={14} />控制模块</span>
+            <div>
               {optionalPanelIds.map((id) => (
-                <label key={id}>
-                  <input type="checkbox" checked={visiblePanels.has(id)} onChange={() => togglePanel(id)} />
+                <button className={activePanel === id ? 'active' : ''} aria-current={activePanel === id ? 'page' : undefined} onClick={() => selectPanel(id)} key={id}>
                   {optionalPanelLabels[id]}
-                </label>
+                </button>
               ))}
             </div>
-          </ControlPanel>
-          {visiblePanels.has('results') && (
+            <button
+              className="theme-toggle"
+              id="global-theme-toggle"
+              type="button"
+              aria-label={uiTheme === 'dark' ? '切换到日间主题' : '切换到夜间主题'}
+              title={uiTheme === 'dark' ? '切换到日间主题' : '切换到夜间主题'}
+              onClick={() => setUiTheme((current) => current === 'dark' ? 'light' : 'dark')}
+            >
+              {uiTheme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+          </nav>
+          {activePanel === 'wizard' && (
+            <ControlPanel className="wide setup-wizard-panel" title="设置向导" icon={<WandSparkles size={16} />}>
+              <SetupWizard
+                theme={uiTheme}
+                platform={clientPlatform}
+                localRuntimeBundled={localRuntimeBundled}
+                routing={routing}
+                runtimeStatus={runtimeStatus}
+                llamaBackend={llamaBackend}
+                installingModel={installingModel}
+                nllbPreparing={nllbPreparing}
+                modelProgress={modelDownloadProgress}
+                modelStatus={modelStatusMessage}
+                nllbStatus={nllbStatus}
+                sharingEnabled={sharingEnabled}
+                communityApiKey={communityApiKey}
+                games={availableGames}
+                onThemeChange={setUiTheme}
+                onRoutingChange={updateRoutingMode}
+                onEntityLookupChange={setEntityLookupEnabled}
+                onEntitySearchChange={updateEntitySearch}
+                onBackendChange={(backend) => void selectLlamaBackend(backend)}
+                onDownloadTranslateGemma={() => void downloadTranslateGemma()}
+                onDownloadNllb={() => void downloadNllb()}
+                onCommunityKeyChange={updateCommunityApiKey}
+                onSharingChange={setKnowledgeSharing}
+                onGameChange={selectGame}
+                onCreateGame={createCommunityGameProfile}
+                onComplete={() => localStorage.setItem(setupWizardCompletedStorageKey, '1')}
+                onExit={() => selectPanel('results')}
+              />
+            </ControlPanel>
+          )}
+          {activePanel === 'results' && (
             <ControlPanel
               className="wide terminology-panel"
               title="实时结果与专业名词"
@@ -1507,7 +1718,7 @@ function App() {
               />
             </ControlPanel>
           )}
-          {visiblePanels.has('logs') && (
+          {activePanel === 'logs' && (
             <ControlPanel
               className="wide diagnostic-panel"
               title="运行日志"
@@ -1542,7 +1753,35 @@ function App() {
               </div>
             </ControlPanel>
           )}
-          {visiblePanels.has('ocr') && (
+          {activePanel === 'tv' && (
+            <ControlPanel className="wide tv-panel" title="电视字幕输出" icon={<Cast size={16} />} action={<span className={`tv-status-label ${tvConnection.connected ? 'connected' : ''}`}><i />{tvConnection.connected ? `已连接 ${tvConnection.name ?? '电视客户端'}` : '等待连接'}</span>}>
+              <div className="tv-cast-control">
+                <div className="segmented">
+                  <button className={tvCastMode === 'text' ? 'active' : ''} onClick={() => selectTvCastMode('text')}>文本传输</button>
+                  <button className={tvCastMode === 'image' ? 'active' : ''} onClick={() => selectTvCastMode('image')}>图片图层</button>
+                </div>
+                <small className="muted">文本模式由电视端按当前字体、透明度和滚动参数绘制；图片模式发送透明 PNG，连接期间本机同步隐藏字幕层。</small>
+                {tvDevices.length > 0 ? (
+                  <div className="tv-device-list">
+                    {tvDevices.map((device) => (
+                      <button key={device.id} className="tv-device" disabled={tvConnectionBusy} onClick={() => void connectTelevision(`${device.address}:${device.port}`)}>
+                        <Wifi size={14} />
+                        <span><strong>{device.name}</strong><small>{device.address}:{device.port}</small></span>
+                        <i>连接</i>
+                      </button>
+                    ))}
+                  </div>
+                ) : <div className="empty-results">正在发现同一局域网内的 NSTrans TV 客户端</div>}
+                <div className="tv-address-row">
+                  <input value={tvAddress} onChange={(event) => setTvAddress(event.target.value)} placeholder="电视 IP，例如 192.168.1.80" aria-label="电视客户端 IP 地址" />
+                  <button className="secondary" disabled={tvConnectionBusy} onClick={() => void connectTelevision()}>{tvConnectionBusy ? <LoaderCircle className="spin" size={14} /> : <Cast size={14} />}握手</button>
+                </div>
+                <div className={`notice ${tvConnection.connected ? 'success' : ''}`}>{tvConnectionMessage}</div>
+                {tvConnection.connected && <button className="text-button" onClick={() => void disconnectTelevision()}><Unplug size={14} />断开电视输出</button>}
+              </div>
+            </ControlPanel>
+          )}
+          {activePanel === 'ocr' && (
             <ControlPanel title="OCR 识别" icon={<ScanText size={16} />}>
               {clientPlatform === 'windows' && (
                 <div className="engine-status">
@@ -1592,7 +1831,7 @@ function App() {
               <small className="muted">{progress.detail ?? translateStatus(progress.status)}</small>
             </ControlPanel>
           )}
-          {visiblePanels.has('translation') && (
+          {activePanel === 'translation' && (
             <ControlPanel title="翻译与词库" icon={<Languages size={16} />}>
               <label>翻译方式</label>
               <div className="segmented">
@@ -1644,12 +1883,16 @@ function App() {
                   {routing.machineTranslationProvider === 'nllb-600m' ? (
                     <div className="model-manager">
                       <div className="engine-status"><EngineState label="NLLB-600M · Transformers.js · ONNX/WASM" ready={runtimeStatus['nllb-600m']} /></div>
-                      <button className="scan-button" disabled={nllbPreparing} onClick={() => void downloadNllb()}>
-                        {nllbPreparing ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}
-                        下载 / 校验 NLLB 模型
-                      </button>
-                      <small className="muted">{nllbStatus}</small>
-                      <small className="muted">模型按需下载并缓存在设备中，不打入安装包；NLLB 模型许可为 CC BY-NC 4.0。</small>
+                      {!runtimeStatus['nllb-600m'] && (
+                        <>
+                          <button className="scan-button" disabled={nllbPreparing} onClick={() => void downloadNllb()}>
+                            {nllbPreparing ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}
+                            下载 / 校验 NLLB 模型
+                          </button>
+                          <small className="muted">{nllbStatus}</small>
+                          <small className="muted">模型按需下载并缓存在设备中，不打入安装包；NLLB 模型许可为 CC BY-NC 4.0。</small>
+                        </>
+                      )}
                     </div>
                   ) : (
                     <div className="notice">通过公开翻译网页获取译文，不需要 API Key；网页结构、访问频率限制或地区网络可能影响可用性。</div>
@@ -1660,7 +1903,7 @@ function App() {
                 <label>游戏类别</label>
                 <div className="select-wrap">
                   <select value={routing.gameId} onChange={(event) => selectGame(event.target.value as GameId)}>
-                    {gameOptions.map((game) => (
+                    {availableGames.map((game) => (
                       <option value={game.id} key={game.id}>
                         {game.label}
                       </option>
@@ -1728,12 +1971,7 @@ function App() {
                   <button
                     className={`toggle ${routing.entityLookupEnabled ? 'on' : ''}`}
                     aria-label="在线学习专有名词"
-                    onClick={() =>
-                      setRouting({
-                        ...routing,
-                        entityLookupEnabled: !routing.entityLookupEnabled,
-                      })
-                    }
+                    onClick={() => setEntityLookupEnabled(!routing.entityLookupEnabled)}
                   >
                     <span />
                   </button>
@@ -1811,7 +2049,7 @@ function App() {
                         autoComplete="off"
                       />
                     )}
-                    {(routing.entitySearch.primary === 'qwen' || routing.entitySearch.fallback === 'qwen' || routing.entitySearch.visionFallbackEnabled) && <input type="password" value={routing.entitySearch.qwenApiKey ?? ''} onChange={(event) => updateEntitySearch({ qwenApiKey: event.target.value })} placeholder="阿里云百炼 DashScope API Key" aria-label="Qwen API Key" autoComplete="off" />}
+                    {(routing.entitySearch.primary === 'qwen' || routing.entitySearch.fallback === 'qwen' || routing.entitySearch.visionFallbackEnabled) && <input type="password" value={routing.entitySearch.qwenApiKey ?? ''} onChange={(event) => updateEntitySearch({ qwenApiKey: event.target.value })} placeholder="阿里百炼（千问）DashScope API Key" aria-label="Qwen API Key" autoComplete="off" />}
                     <div className="toggle-row">
                       <div>
                         <strong>远程视觉识别</strong>
@@ -1861,11 +2099,8 @@ function App() {
                   </button>
                 </div>
                 {sharingEnabled && (
-                  <div className="community-key-row">
-                    <input type="password" value={communityApiKey} onChange={(event) => setCommunityApiKey(event.target.value)} placeholder="粘贴 nst_live_… API Key" aria-label="社区 API Key" />
-                    <button className="secondary" onClick={() => void saveApiKeyAndUpload()}>
-                      保存并上传
-                    </button>
+                  <div className="community-key-row single">
+                    <input type="password" value={communityApiKey} onChange={(event) => updateCommunityApiKey(event.target.value)} placeholder="粘贴 nst_live_… API Key" aria-label="社区 API Key" />
                   </div>
                 )}
               </div>
@@ -1891,8 +2126,18 @@ function App() {
               <div className="notice">{routing.translationStrategy === 'direct' ? `当前直接将 OCR 原文交给${routing.coreTranslationEngine === 'remote' ? '远程 LLM' : routing.coreTranslationEngine === 'machine' ? '机器翻译' : '本机 TranslateGemma'}，不读取或写入翻译记忆。` : `远程词库包优先；未命中新文本由${routing.coreTranslationEngine === 'remote' ? '远程 LLM' : routing.coreTranslationEngine === 'machine' ? '机器翻译' : '本机 TranslateGemma'}翻译并记忆，专名检索在后台进行。`}</div>
             </ControlPanel>
           )}
-          {visiblePanels.has('remote') && (
-            <ControlPanel title="密钥与远程管理" icon={<KeyRound size={16} />}>
+          {activePanel === 'search' && (
+            <ControlPanel title="名词搜索" icon={<Search size={16} />}>
+              <div className="toggle-row">
+                <div>
+                  <strong>共享本地词库贡献</strong>
+                  <small>只上传专名、单词和菜单短标签；开启后自动上传</small>
+                </div>
+                <button className={`toggle ${sharingEnabled ? 'on' : ''}`} aria-label="共享本地词库贡献" onClick={toggleKnowledgeSharing}>
+                  <span />
+                </button>
+              </div>
+              {communityStatus && <small className="muted">{communityStatus}</small>}
               <div className="toggle-row">
                 <div>
                   <strong>在线学习专有名词</strong>
@@ -1902,71 +2147,12 @@ function App() {
                   className={`toggle ${routing.entityLookupEnabled ? 'on' : ''}`}
                   disabled={routing.translationStrategy === 'direct'}
                   aria-label="在线学习专有名词"
-                  onClick={() =>
-                    setRouting({
-                      ...routing,
-                      entityLookupEnabled: !routing.entityLookupEnabled,
-                    })
-                  }
+                  onClick={() => setEntityLookupEnabled(!routing.entityLookupEnabled)}
                 >
                   <span />
                 </button>
               </div>
               {routing.translationStrategy === 'direct' && <div className="notice">当前为 OCR 原文直送模式：自动词库匹配、术语搜索与学习上传均已暂停；远程视觉识别不受影响。</div>}
-              <div className="prompt-config">
-                <label>搜索与翻译上下文</label>
-                <div className="segmented">
-                  <button className={routing.entitySearch.keywordMode === 'current-game' ? 'active' : ''} onClick={() => updateEntitySearch({ keywordMode: 'current-game' })}>跟随当前游戏</button>
-                  <button className={routing.entitySearch.keywordMode === 'custom' ? 'active' : ''} onClick={() => updateEntitySearch({ keywordMode: 'custom' })}>自定义关键词</button>
-                </div>
-                {routing.entitySearch.keywordMode === 'custom' && (
-                  <textarea
-                    value={routing.entitySearch.customKeywords}
-                    onChange={(event) => updateEntitySearch({ customKeywords: event.target.value })}
-                    placeholder="每行或用逗号分隔，例如：最终幻想 VII 重制版，克劳德"
-                    aria-label="自定义游戏搜索关键词"
-                    rows={3}
-                  />
-                )}
-                <small className="muted">当前实际关键词：{effectiveSearchKeywords.join(' / ') || '未设置'}</small>
-                <label>传统搜索 API 查询模板</label>
-                <textarea
-                  value={routing.entitySearch.traditionalSearchTemplate}
-                  onChange={(event) => updateEntitySearch({ traditionalSearchTemplate: event.target.value })}
-                  rows={2}
-                  aria-label="传统搜索查询模板"
-                />
-                <small className="muted">Wiki、Brave 与百度千帆共同使用；可用变量：{'{game}'}（首选游戏名）、{'{keywords}'}（全部关键词）、{'{term}'}。</small>
-                <label>联网 LLM 术语搜索提示</label>
-                <textarea
-                  value={routing.entitySearch.llmSearchPromptTemplate}
-                  onChange={(event) => updateEntitySearch({ llmSearchPromptTemplate: event.target.value })}
-                  rows={5}
-                  aria-label="联网 LLM 搜索提示"
-                />
-                <small className="muted">用于千问搜索模型；JSON 返回格式由程序固定追加，不会被覆盖。</small>
-                <label>核心翻译附加要求</label>
-                <textarea
-                  value={routing.entitySearch.translationInstruction}
-                  onChange={(event) => updateEntitySearch({ translationInstruction: event.target.value })}
-                  placeholder="留空使用默认翻译提示；例如：人名采用大陆官方译名，语气保持简短。"
-                  rows={3}
-                  aria-label="核心翻译附加要求"
-                />
-                <small className="muted">同时应用于本机 TranslateGemma 和远程 LLM；基础防扩写、禁残留日文与输出格式规则始终保留。</small>
-                <button
-                  className="secondary"
-                  onClick={() => updateEntitySearch({
-                    keywordMode: 'current-game',
-                    customKeywords: '',
-                    traditionalSearchTemplate: DEFAULT_TRADITIONAL_SEARCH_TEMPLATE,
-                    llmSearchPromptTemplate: DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE,
-                    translationInstruction: '',
-                  })}
-                >
-                  恢复默认提示与关键词
-                </button>
-              </div>
               <div className="inline-select">
                 <label>主搜索引擎</label>
                 <div className="select-wrap">
@@ -2010,13 +2196,10 @@ function App() {
                   <ChevronDown size={13} />
                 </div>
               </div>
-              <input type="password" value={routing.entitySearch.braveApiKey} onChange={(event) => updateEntitySearch({ braveApiKey: event.target.value })} placeholder="Brave Search API Key（可选）" autoComplete="off" />
-              <input type="password" value={routing.entitySearch.qianfanApiKey} onChange={(event) => updateEntitySearch({ qianfanApiKey: event.target.value })} placeholder="百度千帆 API Key（可选）" autoComplete="off" />
-              <RemoteModelManager settings={routing.entitySearch} onChange={updateEntitySearch} />
               <div className="toggle-row">
                 <div>
-                  <strong>远程视觉识别</strong>
-                  <small>仅搜索链均为空时发送当前文字局部截图</small>
+                  <strong>远程视觉识别（搜索无结果时截图识别）</strong>
+                  <small>仅搜索链均为空时发送当前文字附近的局部截图</small>
                 </div>
                 <button
                   className={`toggle ${routing.entitySearch.visionFallbackEnabled ? 'on' : ''}`}
@@ -2030,27 +2213,49 @@ function App() {
                   <span />
                 </button>
               </div>
-              <div className="toggle-row">
-                <div>
-                  <strong>共享本地词库贡献</strong>
-                  <small>只上传专名、单词和菜单短标签</small>
+              <RemoteModelManager settings={routing.entitySearch} onChange={updateEntitySearch} mode="models" />
+              <div className="prompt-config">
+                <label>搜索与翻译上下文</label>
+                <div className="segmented">
+                  <button className={routing.entitySearch.keywordMode === 'current-game' ? 'active' : ''} onClick={() => updateEntitySearch({ keywordMode: 'current-game' })}>跟随当前游戏</button>
+                  <button className={routing.entitySearch.keywordMode === 'custom' ? 'active' : ''} onClick={() => updateEntitySearch({ keywordMode: 'custom' })}>自定义关键词</button>
                 </div>
-                <button className={`toggle ${sharingEnabled ? 'on' : ''}`} aria-label="共享本地词库贡献" onClick={toggleKnowledgeSharing}>
-                  <span />
-                </button>
+                {routing.entitySearch.keywordMode === 'custom' && (
+                  <textarea value={routing.entitySearch.customKeywords} onChange={(event) => updateEntitySearch({ customKeywords: event.target.value })} placeholder="每行或用逗号分隔，例如：最终幻想 VII 重制版，克劳德" aria-label="自定义游戏搜索关键词" rows={3} />
+                )}
+                <small className="muted">当前实际关键词：{effectiveSearchKeywords.join(' / ') || '未设置'}</small>
+                <label>传统搜索 API 查询模板</label>
+                <textarea value={routing.entitySearch.traditionalSearchTemplate} onChange={(event) => updateEntitySearch({ traditionalSearchTemplate: event.target.value })} rows={2} aria-label="传统搜索查询模板" />
+                <small className="muted">Wiki、Brave 与百度千帆共同使用；可用变量：{'{game}'}（首选游戏名）、{'{keywords}'}（全部关键词）、{'{term}'}。</small>
+                <label>联网 LLM 术语搜索提示</label>
+                <textarea value={routing.entitySearch.llmSearchPromptTemplate} onChange={(event) => updateEntitySearch({ llmSearchPromptTemplate: event.target.value })} rows={5} aria-label="联网 LLM 搜索提示" />
+                <small className="muted">用于千问搜索模型；JSON 返回格式由程序固定追加，不会被覆盖。</small>
+                <label>核心翻译附加要求</label>
+                <textarea value={routing.entitySearch.translationInstruction} onChange={(event) => updateEntitySearch({ translationInstruction: event.target.value })} placeholder="留空使用默认翻译提示；例如：人名采用大陆官方译名，语气保持简短。" rows={3} aria-label="核心翻译附加要求" />
+                <small className="muted">同时应用于本机 TranslateGemma 和远程 LLM；基础防扩写、禁残留日文与输出格式规则始终保留。</small>
+                <button className="secondary" onClick={() => updateEntitySearch({ keywordMode: 'current-game', customKeywords: '', traditionalSearchTemplate: DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, llmSearchPromptTemplate: DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, translationInstruction: '' })}>恢复默认提示与关键词</button>
               </div>
-              {sharingEnabled && (
-                <div className="community-key-row">
-                  <input type="password" value={communityApiKey} onChange={(event) => setCommunityApiKey(event.target.value)} placeholder="社区 nst_live_… API Key" />
-                  <button className="secondary" onClick={() => void saveApiKeyAndUpload()}>
-                    保存并上传
-                  </button>
-                </div>
-              )}
-              <small className="muted">所有密钥仅保存在当前设备；截图只有在启用远程视觉识别且常规搜索全部失败后才会发送。</small>
+              <small className="muted">搜索与模型凭据统一在“密钥管理”中设置；截图只有在启用远程视觉识别且常规搜索全部失败后才会发送。</small>
             </ControlPanel>
           )}
-          {visiblePanels.has('overlay') && (
+          {activePanel === 'keys' && (
+            <ControlPanel title="密钥管理" icon={<KeyRound size={16} />}>
+              <div className="credential-group">
+                <label>Brave Search API Key</label>
+                <input type="password" value={routing.entitySearch.braveApiKey} onChange={(event) => updateEntitySearch({ braveApiKey: event.target.value })} placeholder="用于 Brave Search 名词查询（可选）" aria-label="Brave Search API Key" autoComplete="off" />
+                <label>百度千帆 API Key</label>
+                <input type="password" value={routing.entitySearch.qianfanApiKey} onChange={(event) => updateEntitySearch({ qianfanApiKey: event.target.value })} placeholder="用于百度千帆名词查询（可选）" aria-label="百度千帆 API Key" autoComplete="off" />
+              </div>
+              <RemoteModelManager settings={routing.entitySearch} onChange={updateEntitySearch} mode="credentials" />
+              <div className="credential-group">
+                <label>社区词库客户端 API Key</label>
+                <input type="password" value={communityApiKey} onChange={(event) => updateCommunityApiKey(event.target.value)} placeholder="nst_live_…" aria-label="社区 API Key" autoComplete="off" />
+                <small className="muted">输入时自动保存在本机；在“名词搜索”开启共享后，待共享词条会自动上传。</small>
+              </div>
+              <small className="muted">所有 API Key 与自定义端点只保存在当前设备。搜索策略、模型选择和提示词请在“名词搜索”中设置。</small>
+            </ControlPanel>
+          )}
+          {activePanel === 'overlay' && (
             <ControlPanel title="画面替换" icon={<Sparkles size={16} />}>
               <div className="toggle-row">
                 <div>

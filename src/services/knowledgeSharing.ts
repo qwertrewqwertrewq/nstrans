@@ -1,4 +1,4 @@
-import type { GameId } from '../gameAdapters/types'
+import type { GameId, GameProfile } from '../gameAdapters/types'
 import { isLikelyStandaloneLabel } from './translateGemmaPrompt'
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
@@ -68,6 +68,43 @@ export class CommunityDictionaryEditor {
     const body = await response.json() as { score?: number; scoreDelta?: number; unchanged?: boolean; error?: string }
     if (!response.ok) throw new Error(body.error || `社区候选译名写入失败 (${response.status})`)
     return { score: body.score, scoreDelta: body.unchanged ? 0 : body.scoreDelta ?? 1, unchanged: body.unchanged === true }
+  }
+}
+
+type CommunityGameRecord = { id: string; chineseName: string; japaneseName?: string | null; posterUrl?: string | null }
+
+function communityGameProfile(game: CommunityGameRecord): GameProfile {
+  const searchNames = [...new Set([game.japaneseName?.trim(), game.chineseName.trim()].filter((name): name is string => Boolean(name)))]
+  return {
+    id: game.id,
+    label: game.chineseName,
+    description: game.japaneseName?.trim() ? `${game.japaneseName} · 社区游戏词库` : '社区游戏词库',
+    searchNames,
+  }
+}
+
+export class CommunityGameCatalogClient {
+  private readonly baseUrl: string
+  private readonly apiKey: string
+  constructor(baseUrl: string, apiKey: string) { this.baseUrl = baseUrl.replace(/\/$/u, ''); this.apiKey = apiKey.trim() }
+
+  private headers() {
+    if (!this.apiKey) throw new Error('请先填写社区客户端 API Key')
+    return { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' }
+  }
+
+  async list(): Promise<GameProfile[]> {
+    const response = await fetch(`${this.baseUrl}/api/v1/games`, { headers: this.headers() })
+    const body = await response.json() as { games?: CommunityGameRecord[]; error?: string }
+    if (!response.ok) throw new Error(body.error || `社区游戏列表读取失败 (${response.status})`)
+    return (body.games ?? []).filter((game) => game.id !== 'general').map(communityGameProfile)
+  }
+
+  async create(input: { chineseName: string; japaneseName?: string; posterUrl?: string }): Promise<GameProfile> {
+    const response = await fetch(`${this.baseUrl}/api/v1/games`, { method: 'POST', headers: this.headers(), body: JSON.stringify(input) })
+    const body = await response.json() as CommunityGameRecord & { error?: string }
+    if (!response.ok) throw new Error(body.error || `社区游戏创建失败 (${response.status})`)
+    return communityGameProfile(body)
   }
 }
 

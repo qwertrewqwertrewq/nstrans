@@ -59,6 +59,7 @@ targets:
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         NSCameraUsageDescription: NSTrans 需要访问 USB 采集卡以识别并翻译游戏画面。
+        NSMicrophoneUsageDescription: NSTrans 需要访问采集卡音频输入，以在预览时输出 HDMI 声音。
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -69,8 +70,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.1.2
-        CFBundleVersion: "0.1.2"
+        CFBundleShortVersionString: 0.1.3
+        CFBundleVersion: "0.1.3"
         CFBundleIcons~ipad:
           CFBundlePrimaryIcon:
             CFBundleIconFiles:

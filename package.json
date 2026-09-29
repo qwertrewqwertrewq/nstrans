@@ -1,7 +1,7 @@
 {
   "name": "nstrans",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint src community/worker community/public/app.js vite.config.ts",
     "test": "vitest run",
+    "test:layout": "node tools/testing/verify-fixed-layout.mjs",
     "preview": "vite preview",
     "desktop:dev": "node scripts/run-tauri.mjs dev",
     "desktop:build": "npm run desktop:build:full",
@@ -39,7 +40,8 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "~2.11.1",
+    "@tauri-apps/plugin-opener": "~2.5.3",
     "lucide-react": "^1.38.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -55,6 +57,7 @@
     "@vitejs/plugin-react": "^6.1.0",
     "jsdom": "^29.1.1",
     "oxlint": "^1.79.0",
+    "playwright-core": "^1.55.1",
     "typescript": "~6.0.2",
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
