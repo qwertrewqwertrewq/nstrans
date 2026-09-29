@@ -88,10 +88,11 @@ async function createKey() {
 function setupGameForm() {
   $('#gameForm').addEventListener('submit', async (event) => {
     event.preventDefault()
-    const body = Object.fromEntries(new FormData(event.currentTarget))
+    const form = event.currentTarget
+    const body = Object.fromEntries(new FormData(form))
     try {
       await api('/api/games', { method: 'POST', body: JSON.stringify(body) })
-      event.currentTarget.reset()
+      form.reset()
       $('#gameDialog').close()
       flash('游戏已创建并立即开放')
       const result = await api('/api/games')
