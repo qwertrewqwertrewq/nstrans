@@ -66,16 +66,12 @@ async function route(request, env) {
   if (request.method === 'OPTIONS' && path.startsWith('/api/v1/')) return cors(new Response(null, { status: 204 }))
   if (path === '/auth/github') return startGithubAuth(request, env)
   if (path === '/auth/github/callback') return githubCallback(request, env)
-  if (path === '/auth/client' && request.method === 'GET') return consumeClientTicket(request, env)
   if (path === '/auth/client/github' && request.method === 'GET') return beginClientGithubAuth(request, env)
   if (path === '/auth/logout') return logout(request, env)
-  if (path === '/api/v1/auth/client/ticket' && request.method === 'POST') return cors(await createClientTicket(request, env))
   if (path === '/api/v1/auth/client/start' && request.method === 'POST') return cors(await startClientAuth(request, env))
   if (path === '/api/v1/auth/client/poll' && request.method === 'POST') return cors(await pollClientAuth(request, env))
   if (path === '/api/v1/auth/client/login' && request.method === 'POST') return cors(await nativeClientLogin(request, env))
   if (path === '/api/v1/auth/client/register' && request.method === 'POST') return cors(await nativeClientRegister(request, env))
-  if (path === '/api/client/register' && request.method === 'POST') return clientRegister(request, env)
-  if (path === '/api/client/login' && request.method === 'POST') return clientLogin(request, env)
   if (path === '/api/account/profile' && request.method === 'PATCH') return updateAccountProfile(request, env)
   if (path === '/api/account/password' && request.method === 'POST') return updateAccountPassword(request, env)
   if (path === '/api/stats' && request.method === 'GET') return publicStats(env)
@@ -105,7 +101,8 @@ async function route(request, env) {
   if (path.startsWith('/download/file/')) return downloadFile(request, env, path.slice('/download/file/'.length))
   if (path.startsWith('/download/model/')) return downloadModel(request, path.slice('/download/model/'.length))
   if (path === '/download/model-notice') return modelNotice()
-  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/client-login' || path === '/client-auth-complete') return servePage(request, env)
+  if (path === '/client-login' || path === '/client-login.html' || path === '/client-login.js') return new Response('Not Found', { status: 404 })
+  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/client-auth-complete') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
 }
 
@@ -385,19 +382,6 @@ async function temporaryEncryptionKey(secret) {
 async function encryptTemporarySecret(value, secret) { const iv = crypto.getRandomValues(new Uint8Array(12)); const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await temporaryEncryptionKey(secret), encoder.encode(value)); return { value: bytesBase64url(new Uint8Array(encrypted)), iv: bytesBase64url(iv) } }
 async function decryptTemporarySecret(value, iv, secret) { const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64urlBytes(iv) }, await temporaryEncryptionKey(secret), base64urlBytes(value)); return new TextDecoder().decode(decrypted) }
 
-async function createClientTicket(request, env) {
-  const body = await readJson(request)
-  let build
-  try { build = await verifyClientBuild(body.attestation, env) }
-  catch (error) { return json({ error: error.message || '客户端构建凭证无效' }, 401) }
-  const raw = randomToken(32), hash = await sha256(raw)
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM client_login_tickets WHERE ticket_expires_at<=CURRENT_TIMESTAMP OR consumed_at IS NOT NULL'),
-    env.DB.prepare("INSERT INTO client_login_tickets(token_hash,build_version,key_id,signed_at,expires_at,ticket_expires_at) VALUES(?,?,?,?,?,datetime('now','+10 minutes'))").bind(hash, build.version, build.keyId, build.issuedAt, build.expiresAt),
-  ])
-  return json({ loginUrl: `${env.SITE_ORIGIN}/auth/client?code=${encodeURIComponent(raw)}`, build })
-}
-
 async function verifyClientBuild(attestation, env) {
   if (typeof attestation !== 'string' || attestation.length > 8192) throw new Error('缺少客户端构建凭证')
   let envelope, payload
@@ -417,40 +401,6 @@ async function verifyClientBuild(attestation, env) {
   return { version: payload.version, keyId: payload.keyId, platform: payload.platform, variant: payload.variant, issuedAt: payload.issuedAt, expiresAt: payload.expiresAt }
 }
 
-async function consumeClientTicket(request, env) {
-  if (!env.CLIENT_ACCESS_SECRET) return json({ error: '客户端账号服务尚未完成配置' }, 503)
-  const raw = new URL(request.url).searchParams.get('code') || ''
-  const hash = await sha256(raw)
-  const ticket = raw && await env.DB.prepare('SELECT token_hash FROM client_login_tickets WHERE token_hash=? AND consumed_at IS NULL AND ticket_expires_at>CURRENT_TIMESTAMP').bind(hash).first()
-  if (!ticket) return json({ error: '官方客户端登录链接无效或已过期，请返回客户端重新打开' }, 401)
-  await env.DB.prepare('UPDATE client_login_tickets SET consumed_at=CURRENT_TIMESTAMP WHERE token_hash=?').bind(hash).run()
-  const access = randomToken(32), deadline = Math.floor(Date.now() / 1000) + 600
-  const headers = new Headers({ location: `${env.SITE_ORIGIN}/client-login` })
-  headers.append('set-cookie', cookie('client_access', `${access}.${deadline}.${await hmacSha256(`${access}.${deadline}`, env.CLIENT_ACCESS_SECRET)}`, 600))
-  return new Response(null, { status: 302, headers })
-}
-
-async function clientRegister(request, env) {
-  if (!sameOrigin(request, env) || !(await validClientAccess(request, env))) return json({ error: '请从官方客户端重新打开登录页面' }, 401)
-  const body = await readJson(request), username = clean(body.username, 32), password = typeof body.password === 'string' ? body.password : ''
-  const invalid = validateCredentials(username, password); if (invalid) return json({ error: invalid }, 400)
-  const exists = await env.DB.prepare('SELECT id FROM users WHERE username=? COLLATE NOCASE').bind(username).first()
-  if (exists) return json({ error: '用户名已被使用' }, 409)
-  const passwordData = await hashPassword(password)
-  let githubId
-  do { githubId = -Math.floor(1 + Math.random() * Number.MAX_SAFE_INTEGER) } while (await env.DB.prepare('SELECT id FROM users WHERE github_id=?').bind(githubId).first())
-  const result = await env.DB.prepare('INSERT INTO users(github_id,login,username,avatar_url,role,password_hash,password_salt,password_iterations) VALUES(?,?,?,?,?,?,?,?)').bind(githubId, username, username, '', 'user', passwordData.hash, passwordData.salt, passwordData.iterations).run()
-  return createSessionResponse(env, result.meta.last_row_id)
-}
-
-async function clientLogin(request, env) {
-  if (!sameOrigin(request, env) || !(await validClientAccess(request, env))) return json({ error: '请从官方客户端重新打开登录页面' }, 401)
-  const body = await readJson(request), username = clean(body.username, 32), password = typeof body.password === 'string' ? body.password : ''
-  const user = await env.DB.prepare('SELECT id,password_hash,password_salt,password_iterations FROM users WHERE username=? COLLATE NOCASE').bind(username).first()
-  if (!user?.password_hash || !(await verifyPassword(password, user))) return json({ error: '用户名或密码错误' }, 401)
-  return createSessionResponse(env, user.id)
-}
-
 async function updateAccountProfile(request, env) {
   const auth = await requireUser(request, env); if (auth.response) return auth.response
   const username = clean((await readJson(request)).username, 32)
@@ -467,21 +417,6 @@ async function updateAccountPassword(request, env) {
   const data = await hashPassword(password)
   await env.DB.prepare('UPDATE users SET password_hash=?,password_salt=?,password_iterations=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(data.hash, data.salt, data.iterations, auth.user.id).run()
   return json({ ok: true })
-}
-
-async function createSessionResponse(env, userId) {
-  const raw = randomToken(32), hash = await sha256(raw)
-  await env.DB.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,datetime('now','+30 days'))").bind(hash, userId).run()
-  const headers = new Headers(jsonHeaders)
-  headers.append('set-cookie', cookie('session', raw, 30 * 86400)); headers.append('set-cookie', cookie('client_access', '', 0))
-  return new Response(JSON.stringify({ ok: true, redirect: '/dashboard' }), { status: 200, headers })
-}
-
-async function validClientAccess(request, env) {
-  const [raw, deadlineText, signature] = (cookies(request).client_access || '').split('.')
-  const deadline = Number(deadlineText)
-  if (!raw || !signature || !env.CLIENT_ACCESS_SECRET || !Number.isInteger(deadline) || deadline <= Math.floor(Date.now() / 1000)) return false
-  return safeEqual(signature, await hmacSha256(`${raw}.${deadline}`, env.CLIENT_ACCESS_SECRET))
 }
 
 function validateCredentials(username, password) {
@@ -879,5 +814,4 @@ function cookies(request) { return Object.fromEntries((request.headers.get('cook
 function cookie(name, value, maxAge) { return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}` }
 function randomToken(bytes) { const data = new Uint8Array(bytes); crypto.getRandomValues(data); return btoa(String.fromCharCode(...data)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/gu, '') }
 async function sha256(value) { const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value))); return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('') }
-async function hmacSha256(value, secret) { const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']); return bytesBase64url(new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(value)))) }
 function safeEqual(a, b) { if (a.length !== b.length) return false; let result = 0; for (let index = 0; index < a.length; index++) result |= a.charCodeAt(index) ^ b.charCodeAt(index); return result === 0 }

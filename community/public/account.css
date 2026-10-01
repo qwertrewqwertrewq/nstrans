@@ -2,10 +2,8 @@
 .account-auth>section{width:min(860px,100%)}
 .account-auth h1{font-family:Georgia,"Songti SC",serif;font-size:48px;font-weight:500;margin:14px 0}
 .account-auth>section>p{color:var(--muted);line-height:1.8}
-.auth-grid,.account-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:28px}
-.auth-grid form{display:grid;gap:16px}.auth-grid h2,.account-panels h2{margin:0}
-.auth-flash{padding:12px 15px;background:#ffe3dd;color:var(--red);margin-top:20px}
-.auth-divider{text-align:center;color:var(--muted);font-size:12px;margin:24px 0}.auth-divider:before,.auth-divider:after{content:"";display:inline-block;width:36%;height:1px;background:var(--line);vertical-align:middle;margin:0 14px}
+.account-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:28px}
+.account-panels h2{margin:0}
 .account-panels{grid-template-columns:repeat(3,minmax(0,1fr))}.account-panels .panel{display:flex;flex-direction:column;gap:15px}.account-panels .panel p{color:var(--muted);font-size:12px;line-height:1.6;min-height:38px}.account-panels .button{margin-top:auto}
-@media(max-width:850px){.auth-grid,.account-panels{grid-template-columns:1fr}.account-auth h1{font-size:38px}.auth-divider:before,.auth-divider:after{width:30%}}
+@media(max-width:850px){.account-panels{grid-template-columns:1fr}.account-auth h1{font-size:38px}}
 .client-auth-complete{text-align:center;padding:55px}.client-auth-complete img{width:72px;height:72px}.client-auth-complete p{max-width:560px;margin:0 auto;color:var(--muted);line-height:1.8}

@@ -31,14 +31,6 @@ export async function officialBuildInfo(): Promise<OfficialBuildInfo> {
   } catch { return { ...native, available: false } }
 }
 
-export async function openOfficialClientLogin(origin: string, build: OfficialBuildInfo) {
-  if (!build.available || !build.attestation) throw new Error('当前安装包不含官方构建签名')
-  const response = await fetch(`${origin.replace(/\/$/u, '')}/api/v1/auth/client/ticket`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ attestation: build.attestation }) })
-  const result = await response.json().catch(() => ({})) as { loginUrl?: string; error?: string }
-  if (!response.ok || !result.loginUrl) throw new Error(result.error || `官方构建验证失败 (${response.status})`)
-  await openUrl(result.loginUrl)
-}
-
 function clientDevice() {
   const storageKey = 'nstrans.community-device-id.v1'
   let deviceId = localStorage.getItem(storageKey) ?? ''

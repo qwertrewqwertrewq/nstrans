@@ -37,7 +37,7 @@ Certificates record a 365-day validity window (configurable with the Actions env
 and minimum version; signing/expiry timestamps are retained for a later
 rotation policy and are not yet used to reject an otherwise valid build.
 
-After verification the Worker issues a one-time, ten-minute browser ticket.
+After verification the official client can authenticate directly with a username and password, or start a ten-minute GitHub authorization flow in the browser. The resulting client key is returned to the application without exposing it on the web page.
 Users can register a username/password account, use the same permissions and
 API-key system as GitHub users, and bind GitHub later. Existing GitHub users can
 set a password and custom username in “账号与绑定”. This build certificate is a
