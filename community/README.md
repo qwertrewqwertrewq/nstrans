@@ -17,6 +17,33 @@ npx wrangler secret put GITHUB_CLIENT_ID --config community/wrangler.jsonc
 npx wrangler secret put GITHUB_CLIENT_SECRET --config community/wrangler.jsonc
 ```
 
+## Official client account signing
+
+Official GitHub Actions builds (macOS, Windows, Android and iPadOS; not the TV
+subtitle client) embed an Ed25519 build certificate containing the app version,
+platform, build variant, signing time and expiry time. Generate a signing pair
+once with `node scripts/generate-client-signing-key.mjs`, then configure:
+
+- GitHub Actions secret `CLIENT_BUILD_SIGNING_KEY` from `githubSecret`.
+- Worker secret `CLIENT_BUILD_PUBLIC_KEYS` from `workerSecret`.
+- Worker secret `CLIENT_ACCESS_SECRET` with a separate random value of at least
+  32 bytes.
+
+The private signing key must exist only in GitHub Actions. The Worker only gets
+the public key. `CLIENT_BUILD_KEY_ID` in both build workflows selects the key;
+`CLIENT_MIN_VERSION` in `wrangler.jsonc` controls the oldest accepted client.
+Certificates record a 365-day validity window (configurable with the Actions env
+`CLIENT_BUILD_ATTESTATION_DAYS`). The current gate verifies the Ed25519 signature
+and minimum version; signing/expiry timestamps are retained for a later
+rotation policy and are not yet used to reject an otherwise valid build.
+
+After verification the Worker issues a one-time, ten-minute browser ticket.
+Users can register a username/password account, use the same permissions and
+API-key system as GitHub users, and bind GitHub later. Existing GitHub users can
+set a password and custom username in “账号与绑定”. This build certificate is a
+distribution-origin check, not device-bound attestation; future versions can
+replace it with Apple App Attest, Play Integrity, or platform signing checks.
+
 Deploy schema and Worker:
 
 ```bash

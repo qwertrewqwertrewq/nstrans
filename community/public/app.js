@@ -19,7 +19,7 @@ async function loadHomeStats() {
   } catch { /* Keep graceful placeholders. */ }
 }
 
-const routeNames = { overview: '概览', keys: '客户端密钥', games: '游戏管理', dictionary: '词库与评分' }
+const routeNames = { overview: '概览', keys: '客户端密钥', games: '游戏管理', dictionary: '词库与评分', account: '账号与绑定' }
 let dashboardUser = null
 let dashboardGames = []
 let dictionaryTerms = []
@@ -46,7 +46,7 @@ async function initDashboard() {
     const [{ user }, stats, gamesResult] = await Promise.all([api('/api/me'), api('/api/stats'), api('/api/games')])
     dashboardUser = user
     dashboardGames = gamesResult.games
-    $('#avatar').src = user.avatar_url
+    $('#avatar').src = user.avatar_url || '/project-logo.svg'
     $('#login').textContent = `@${user.login}`
     $('#roleBadge').textContent = user.role === 'admin' ? '管理员' : '贡献者'
     $('#welcomeName').textContent = user.login
@@ -55,7 +55,17 @@ async function initDashboard() {
     if (route === 'keys') { $('#createKey').addEventListener('click', createKey); await loadKeys() }
     if (route === 'games') renderGames(dashboardGames)
     if (route === 'dictionary') setupDictionary(dashboardGames)
+    if (route === 'account') setupAccount(user)
   } catch { location.href = '/auth/github' }
+}
+
+function setupAccount(user) {
+  const profile = $('#profileForm'), password = $('#passwordForm')
+  profile.elements.username.value = user.login
+  $('#githubStatus').textContent = user.github_bound ? '已绑定 GitHub，可继续使用 GitHub OAuth 登录。' : '尚未绑定 GitHub。绑定后两种登录方式会进入同一账号。'
+  $('#githubBind').hidden = Boolean(user.github_bound)
+  profile.addEventListener('submit', async (event) => { event.preventDefault(); try { await api('/api/account/profile', { method: 'PATCH', body: JSON.stringify(Object.fromEntries(new FormData(profile))) }); flash('用户名已更新') } catch (error) { flash(error.message, true) } })
+  password.addEventListener('submit', async (event) => { event.preventDefault(); try { await api('/api/account/password', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(password))) }); password.reset(); flash('密码已设置') } catch (error) { flash(error.message, true) } })
 }
 
 function renderMetrics(stats) {

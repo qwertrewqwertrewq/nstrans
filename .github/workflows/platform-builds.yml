@@ -15,6 +15,8 @@ concurrency:
 env:
   OLLAMA_VERSION: 0.12.3
   WINDOWS_OLLAMA_VERSION: 0.33.3
+  CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
+  CLIENT_BUILD_KEY_ID: nstrans-release-2026-01
 
 jobs:
   macos:
@@ -40,11 +42,13 @@ jobs:
           ./scripts/setup-macos-runtime.sh "$OLLAMA_VERSION"
       - name: Build WithLlama DMG
         run: |
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform macos --variant with-llama)"
           npm run desktop:build:full
           mkdir -p artifacts/WithLlama
           cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64.dmg artifacts/WithLlama/NSTrans-macOS-arm64-WithLlama.dmg
       - name: Build RemoteOnly DMG
         run: |
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform macos --variant remote-only)"
           npm run desktop:build:remote
           mkdir -p artifacts/RemoteOnly
           cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64_remote-only.dmg artifacts/RemoteOnly/NSTrans-macOS-arm64-RemoteOnly.dmg
@@ -78,11 +82,13 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Build WithLlama unsigned IPA
         run: |
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant with-llama)"
           npm run ios:build:with-llama
           mkdir -p artifacts/WithLlama
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa artifacts/WithLlama/NSTrans-iPadOS-arm64-unsigned-WithLlama.ipa
       - name: Build RemoteOnly unsigned IPA
         run: |
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant remote-only)"
           npm run ios:build:remote
           mkdir -p artifacts/RemoteOnly
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa artifacts/RemoteOnly/NSTrans-iPadOS-arm64-unsigned-RemoteOnly.ipa
@@ -126,11 +132,13 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Build WithLlama APK
         run: |
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant with-llama)"
           npm run android:build:with-llama
           mkdir -p artifacts/WithLlama
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/WithLlama/NSTrans-Android-arm64-debug-WithLlama.apk
       - name: Build RemoteOnly APK
         run: |
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant remote-only)"
           npm run android:build:remote
           mkdir -p artifacts/RemoteOnly
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/RemoteOnly/NSTrans-Android-arm64-debug-RemoteOnly.apk
@@ -213,6 +221,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $env:NSTRANS_BUILD_ATTESTATION = node scripts/sign-client-build.mjs --platform windows --variant remote-only
           npm run windows:build:remote
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force artifacts/RemoteOnly | Out-Null
@@ -235,6 +244,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $env:NSTRANS_BUILD_ATTESTATION = node scripts/sign-client-build.mjs --platform windows --variant with-llama
           npm run windows:build:full
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force artifacts/WithLlama | Out-Null

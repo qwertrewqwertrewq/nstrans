@@ -29,6 +29,7 @@ import { RemoteModelManager } from './components/RemoteModelManager'
 import { buildTvImagePayload, buildTvTextPayload, connectTv, disconnectTv, listTvDevices, pushTvOverlay, tvConnectionStatus, type TvCastMode, type TvConnectionStatus, type TvDevice } from './services/tvCast'
 import { findCaptureAudioDevice, openPreferredVideoStream, waitForVideoDimensions, type CaptureDeviceDescriptor } from './services/mediaCapture'
 import { SetupWizard } from './components/SetupWizard'
+import { officialBuildInfo, openOfficialClientLogin, type OfficialBuildInfo } from './services/communityAccount'
 
 const emptyLatency: LatencySample = {
   capture: 0,
@@ -243,6 +244,8 @@ function App() {
     [sharingPending, setSharingPending] = useState(knowledgeServices.contributions.pendingCount())
   const [communityApiKey, setCommunityApiKey] = useState(loadCommunityApiKey()),
     [dictionaryStatus, setDictionaryStatus] = useState(() => knowledgeServices.dictionaries.status(defaultRoutingSettings.gameId))
+  const [officialBuild, setOfficialBuild] = useState<OfficialBuildInfo>({ available: false, version: '—' })
+  const [accountLoginStatus, setAccountLoginStatus] = useState('')
   const [communityGameProfiles, setCommunityGameProfiles] = useState<GameProfile[]>(loadCommunityGameProfiles)
   const [dictionaryReady, setDictionaryReady] = useState(false)
   const [communityStatus, setCommunityStatus] = useState('')
@@ -307,6 +310,10 @@ function App() {
     void invoke<ClientPlatform>('client_platform')
       .then(setClientPlatform)
       .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    void officialBuildInfo().then(setOfficialBuild).catch(() => undefined)
   }, [])
 
   const refreshDevices = useCallback(async () => {
@@ -2238,6 +2245,12 @@ function App() {
           )}
           {activePanel === 'keys' && (
             <ControlPanel title="密钥管理" icon={<KeyRound size={16} />}>
+              <div className="credential-group">
+                <label>NSTrans 社区账号</label>
+                <div className="notice">{officialBuild.available ? `官方构建 ${officialBuild.version} · ${officialBuild.platform ?? '未知平台'} · ${officialBuild.variant === 'with-llama' ? 'WithLlama' : 'RemoteOnly'} · 签名 ${officialBuild.issuedAt ? new Date(officialBuild.issuedAt).toLocaleString() : '—'} · 到期 ${officialBuild.expiresAt ? new Date(officialBuild.expiresAt).toLocaleString() : '—'}` : `当前版本 ${officialBuild.version} 未包含官方构建签名；本地开发构建不能使用客户端账号入口。`}</div>
+                <button className="secondary" disabled={!officialBuild.available} onClick={async () => { try { setAccountLoginStatus('正在验证官方构建…'); await openOfficialClientLogin(communityOrigin, officialBuild); setAccountLoginStatus('已在浏览器打开登录页面') } catch (reason) { setAccountLoginStatus(errorMessage(reason, '无法打开社区登录')) } }}>登录或注册社区账号</button>
+                {accountLoginStatus && <small className="muted">{accountLoginStatus}</small>}
+              </div>
               <div className="credential-group">
                 <label>Brave Search API Key</label>
                 <input type="password" value={routing.entitySearch.braveApiKey} onChange={(event) => updateEntitySearch({ braveApiKey: event.target.value })} placeholder="用于 Brave Search 名词查询（可选）" aria-label="Brave Search API Key" autoComplete="off" />

@@ -64,9 +64,15 @@ export default {
 async function route(request, env) {
   const url = new URL(request.url), path = url.pathname
   if (request.method === 'OPTIONS' && path.startsWith('/api/v1/')) return cors(new Response(null, { status: 204 }))
-  if (path === '/auth/github') return startGithubAuth(env)
+  if (path === '/auth/github') return startGithubAuth(request, env)
   if (path === '/auth/github/callback') return githubCallback(request, env)
+  if (path === '/auth/client' && request.method === 'GET') return consumeClientTicket(request, env)
   if (path === '/auth/logout') return logout(request, env)
+  if (path === '/api/v1/auth/client/ticket' && request.method === 'POST') return cors(await createClientTicket(request, env))
+  if (path === '/api/client/register' && request.method === 'POST') return clientRegister(request, env)
+  if (path === '/api/client/login' && request.method === 'POST') return clientLogin(request, env)
+  if (path === '/api/account/profile' && request.method === 'PATCH') return updateAccountProfile(request, env)
+  if (path === '/api/account/password' && request.method === 'POST') return updateAccountPassword(request, env)
   if (path === '/api/stats' && request.method === 'GET') return publicStats(env)
   if (path === '/api/me' && request.method === 'GET') return me(request, env)
   if (path === '/api/keys' && request.method === 'GET') return listKeys(request, env)
@@ -94,7 +100,7 @@ async function route(request, env) {
   if (path.startsWith('/download/file/')) return downloadFile(request, env, path.slice('/download/file/'.length))
   if (path.startsWith('/download/model/')) return downloadModel(request, path.slice('/download/model/'.length))
   if (path === '/download/model-notice') return modelNotice()
-  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download') return servePage(request, env)
+  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/client-login') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
 }
 
@@ -227,12 +233,16 @@ async function syncLatestRelease(env) {
   return { ok: true, tag: manifest.tag, assets: Object.keys(manifest.assets).length }
 }
 
-async function startGithubAuth(env) {
+async function startGithubAuth(request, env) {
   if (!env.GITHUB_CLIENT_ID) return json({ error: 'GitHub OAuth 尚未配置' }, 503)
+  const intent = new URL(request.url).searchParams.get('intent') === 'bind' ? 'bind' : 'login'
   const state = randomToken(24), callback = `${env.SITE_ORIGIN}/auth/github/callback`
   const target = new URL('https://github.com/login/oauth/authorize')
   target.search = new URLSearchParams({ client_id: env.GITHUB_CLIENT_ID, redirect_uri: callback, scope: 'read:user', state }).toString()
-  return new Response(null, { status: 302, headers: { location: target.toString(), 'set-cookie': cookie('oauth_state', state, 600) } })
+  const headers = new Headers({ location: target.toString() })
+  headers.append('set-cookie', cookie('oauth_state', state, 600))
+  headers.append('set-cookie', cookie('oauth_intent', intent, 600))
+  return new Response(null, { status: 302, headers })
 }
 
 async function githubCallback(request, env) {
@@ -246,15 +256,143 @@ async function githubCallback(request, env) {
   if (!profileResponse.ok || !profile.id || !profile.login) return json({ error: '无法读取 GitHub 用户资料' }, 401)
   const admins = (env.ADMIN_GITHUB_LOGINS || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
   const role = admins.includes(String(profile.login).toLowerCase()) ? 'admin' : 'user'
-  await env.DB.prepare(`INSERT INTO users(github_id, login, avatar_url, role) VALUES (?, ?, ?, ?)
+  const intent = cookies(request).oauth_intent
+  if (intent === 'bind') {
+    const active = await currentUser(request, env)
+    if (!active) return json({ error: '绑定前请先登录当前账号' }, 401)
+    const occupied = await env.DB.prepare('SELECT id FROM users WHERE github_id=? AND id<>?').bind(profile.id, active.id).first()
+    if (occupied) return json({ error: '该 GitHub 账号已绑定其他 NSTrans 账号' }, 409)
+    await env.DB.prepare(`UPDATE users SET github_id=?,github_login=?,login=?,avatar_url=?,role=CASE WHEN ?='admin' THEN 'admin' ELSE role END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(profile.id, profile.login, profile.login, profile.avatar_url || '', role, active.id).run()
+    const headers = new Headers({ location: `${env.SITE_ORIGIN}/dashboard?view=account` })
+    headers.append('set-cookie', cookie('oauth_state', '', 0)); headers.append('set-cookie', cookie('oauth_intent', '', 0))
+    return new Response(null, { status: 302, headers })
+  }
+  const usernameTaken = await env.DB.prepare('SELECT id FROM users WHERE username=? COLLATE NOCASE').bind(profile.login).first()
+  const initialUsername = usernameTaken ? `${profile.login}-${profile.id}`.slice(0, 32) : profile.login
+  await env.DB.prepare(`INSERT INTO users(github_id, login, username, github_login, avatar_url, role) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(github_id) DO UPDATE SET login=excluded.login, avatar_url=excluded.avatar_url,
-    role=CASE WHEN excluded.role='admin' THEN 'admin' ELSE users.role END, updated_at=CURRENT_TIMESTAMP`).bind(profile.id, profile.login, profile.avatar_url || '', role).run()
+    github_login=excluded.github_login,role=CASE WHEN excluded.role='admin' THEN 'admin' ELSE users.role END, updated_at=CURRENT_TIMESTAMP`).bind(profile.id, profile.login, initialUsername, profile.login, profile.avatar_url || '', role).run()
   const user = await env.DB.prepare('SELECT id FROM users WHERE github_id=?').bind(profile.id).first()
   const raw = randomToken(32), hash = await sha256(raw)
   await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP'), env.DB.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,datetime('now','+30 days'))").bind(hash, user.id)])
-  const headers = new Headers({ location: `${env.SITE_ORIGIN}/dashboard` }); headers.append('set-cookie', cookie('session', raw, 30 * 86400)); headers.append('set-cookie', cookie('oauth_state', '', 0))
+  const headers = new Headers({ location: `${env.SITE_ORIGIN}/dashboard` }); headers.append('set-cookie', cookie('session', raw, 30 * 86400)); headers.append('set-cookie', cookie('oauth_state', '', 0)); headers.append('set-cookie', cookie('oauth_intent', '', 0))
   return new Response(null, { status: 302, headers })
 }
+
+async function createClientTicket(request, env) {
+  const body = await readJson(request)
+  let build
+  try { build = await verifyClientBuild(body.attestation, env) }
+  catch (error) { return json({ error: error.message || '客户端构建凭证无效' }, 401) }
+  const raw = randomToken(32), hash = await sha256(raw)
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM client_login_tickets WHERE ticket_expires_at<=CURRENT_TIMESTAMP OR consumed_at IS NOT NULL'),
+    env.DB.prepare("INSERT INTO client_login_tickets(token_hash,build_version,key_id,signed_at,expires_at,ticket_expires_at) VALUES(?,?,?,?,?,datetime('now','+10 minutes'))").bind(hash, build.version, build.keyId, build.issuedAt, build.expiresAt),
+  ])
+  return json({ loginUrl: `${env.SITE_ORIGIN}/auth/client?code=${encodeURIComponent(raw)}`, build })
+}
+
+async function verifyClientBuild(attestation, env) {
+  if (typeof attestation !== 'string' || attestation.length > 8192) throw new Error('缺少客户端构建凭证')
+  let envelope, payload
+  try {
+    envelope = JSON.parse(new TextDecoder().decode(base64urlBytes(attestation)))
+    payload = JSON.parse(new TextDecoder().decode(base64urlBytes(envelope.payload)))
+  } catch { throw new Error('客户端构建凭证格式无效') }
+  const keys = JSON.parse(env.CLIENT_BUILD_PUBLIC_KEYS || '{}')
+  const publicKey = keys[payload.keyId]
+  if (!publicKey || payload.schema !== 1 || !envelope.signature) throw new Error('客户端签名密钥未知')
+  if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(payload.version || '')) throw new Error('客户端版本无效')
+  if (compareVersions(payload.version, env.CLIENT_MIN_VERSION || '0.1.4') < 0) throw new Error(`客户端版本过低，请升级至 ${env.CLIENT_MIN_VERSION || '0.1.4'} 或更高版本`)
+  if (!Number.isFinite(Date.parse(payload.issuedAt)) || !Number.isFinite(Date.parse(payload.expiresAt))) throw new Error('客户端构建时间信息无效')
+  const key = await crypto.subtle.importKey('raw', base64urlBytes(publicKey), { name: 'Ed25519' }, false, ['verify'])
+  const valid = await crypto.subtle.verify('Ed25519', key, base64urlBytes(envelope.signature), encoder.encode(envelope.payload))
+  if (!valid) throw new Error('客户端构建签名校验失败')
+  return { version: payload.version, keyId: payload.keyId, platform: payload.platform, variant: payload.variant, issuedAt: payload.issuedAt, expiresAt: payload.expiresAt }
+}
+
+async function consumeClientTicket(request, env) {
+  if (!env.CLIENT_ACCESS_SECRET) return json({ error: '客户端账号服务尚未完成配置' }, 503)
+  const raw = new URL(request.url).searchParams.get('code') || ''
+  const hash = await sha256(raw)
+  const ticket = raw && await env.DB.prepare('SELECT token_hash FROM client_login_tickets WHERE token_hash=? AND consumed_at IS NULL AND ticket_expires_at>CURRENT_TIMESTAMP').bind(hash).first()
+  if (!ticket) return json({ error: '官方客户端登录链接无效或已过期，请返回客户端重新打开' }, 401)
+  await env.DB.prepare('UPDATE client_login_tickets SET consumed_at=CURRENT_TIMESTAMP WHERE token_hash=?').bind(hash).run()
+  const access = randomToken(32), deadline = Math.floor(Date.now() / 1000) + 600
+  const headers = new Headers({ location: `${env.SITE_ORIGIN}/client-login` })
+  headers.append('set-cookie', cookie('client_access', `${access}.${deadline}.${await hmacSha256(`${access}.${deadline}`, env.CLIENT_ACCESS_SECRET)}`, 600))
+  return new Response(null, { status: 302, headers })
+}
+
+async function clientRegister(request, env) {
+  if (!sameOrigin(request, env) || !(await validClientAccess(request, env))) return json({ error: '请从官方客户端重新打开登录页面' }, 401)
+  const body = await readJson(request), username = clean(body.username, 32), password = typeof body.password === 'string' ? body.password : ''
+  const invalid = validateCredentials(username, password); if (invalid) return json({ error: invalid }, 400)
+  const exists = await env.DB.prepare('SELECT id FROM users WHERE username=? COLLATE NOCASE').bind(username).first()
+  if (exists) return json({ error: '用户名已被使用' }, 409)
+  const passwordData = await hashPassword(password)
+  let githubId
+  do { githubId = -Math.floor(1 + Math.random() * Number.MAX_SAFE_INTEGER) } while (await env.DB.prepare('SELECT id FROM users WHERE github_id=?').bind(githubId).first())
+  const result = await env.DB.prepare('INSERT INTO users(github_id,login,username,avatar_url,role,password_hash,password_salt,password_iterations) VALUES(?,?,?,?,?,?,?,?)').bind(githubId, username, username, '', 'user', passwordData.hash, passwordData.salt, passwordData.iterations).run()
+  return createSessionResponse(env, result.meta.last_row_id)
+}
+
+async function clientLogin(request, env) {
+  if (!sameOrigin(request, env) || !(await validClientAccess(request, env))) return json({ error: '请从官方客户端重新打开登录页面' }, 401)
+  const body = await readJson(request), username = clean(body.username, 32), password = typeof body.password === 'string' ? body.password : ''
+  const user = await env.DB.prepare('SELECT id,password_hash,password_salt,password_iterations FROM users WHERE username=? COLLATE NOCASE').bind(username).first()
+  if (!user?.password_hash || !(await verifyPassword(password, user))) return json({ error: '用户名或密码错误' }, 401)
+  return createSessionResponse(env, user.id)
+}
+
+async function updateAccountProfile(request, env) {
+  const auth = await requireUser(request, env); if (auth.response) return auth.response
+  const username = clean((await readJson(request)).username, 32)
+  if (!validUsername(username)) return json({ error: '用户名需为 3–32 个中英文字、数字、下划线或连字符' }, 400)
+  try { await env.DB.prepare('UPDATE users SET username=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(username, auth.user.id).run() }
+  catch { return json({ error: '用户名已被使用' }, 409) }
+  return json({ ok: true, username })
+}
+
+async function updateAccountPassword(request, env) {
+  const auth = await requireUser(request, env); if (auth.response) return auth.response
+  const password = String((await readJson(request)).password || '')
+  if (password.length < 10 || password.length > 128) return json({ error: '密码长度需为 10–128 个字符' }, 400)
+  const data = await hashPassword(password)
+  await env.DB.prepare('UPDATE users SET password_hash=?,password_salt=?,password_iterations=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(data.hash, data.salt, data.iterations, auth.user.id).run()
+  return json({ ok: true })
+}
+
+async function createSessionResponse(env, userId) {
+  const raw = randomToken(32), hash = await sha256(raw)
+  await env.DB.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,datetime('now','+30 days'))").bind(hash, userId).run()
+  const headers = new Headers(jsonHeaders)
+  headers.append('set-cookie', cookie('session', raw, 30 * 86400)); headers.append('set-cookie', cookie('client_access', '', 0))
+  return new Response(JSON.stringify({ ok: true, redirect: '/dashboard' }), { status: 200, headers })
+}
+
+async function validClientAccess(request, env) {
+  const [raw, deadlineText, signature] = (cookies(request).client_access || '').split('.')
+  const deadline = Number(deadlineText)
+  if (!raw || !signature || !env.CLIENT_ACCESS_SECRET || !Number.isInteger(deadline) || deadline <= Math.floor(Date.now() / 1000)) return false
+  return safeEqual(signature, await hmacSha256(`${raw}.${deadline}`, env.CLIENT_ACCESS_SECRET))
+}
+
+function validateCredentials(username, password) {
+  if (!validUsername(username)) return '用户名需为 3–32 个中英文字、数字、下划线或连字符'
+  if (password.length < 10 || password.length > 128) return '密码长度需为 10–128 个字符'
+  return ''
+}
+function validUsername(value) { return /^[\p{L}\p{N}_-]{3,32}$/u.test(value) }
+async function hashPassword(password, salt = randomToken(16), iterations = 180000) {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: encoder.encode(salt), iterations }, key, 256)
+  return { hash: bytesBase64url(new Uint8Array(bits)), salt, iterations }
+}
+async function verifyPassword(password, user) { const result = await hashPassword(password, user.password_salt, user.password_iterations); return safeEqual(result.hash, user.password_hash) }
+function base64urlBytes(value) { const base64 = value.replace(/-/gu, '+').replace(/_/gu, '/').padEnd(Math.ceil(value.length / 4) * 4, '='); return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0)) }
+function bytesBase64url(bytes) { return btoa(String.fromCharCode(...bytes)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/gu, '') }
+function compareVersions(left, right) { const a = left.split(/[.+-]/u).slice(0, 3).map(Number), b = right.split(/[.+-]/u).slice(0, 3).map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0); return 0 }
 
 async function logout(request, env) {
   const raw = cookies(request).session
@@ -265,13 +403,13 @@ async function logout(request, env) {
 async function currentUser(request, env) {
   const raw = cookies(request).session
   if (!raw) return null
-  return env.DB.prepare(`SELECT u.id,u.login,u.avatar_url,u.role FROM sessions s JOIN users u ON u.id=s.user_id
+  return env.DB.prepare(`SELECT u.id,COALESCE(u.username,u.login) login,u.avatar_url,u.role,(u.github_id>0) github_bound,(u.password_hash IS NOT NULL) has_password FROM sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP`).bind(await sha256(raw)).first()
 }
 
 async function requireUser(request, env, admin = false) {
   const user = await currentUser(request, env)
-  if (!user) return { response: json({ error: '请先使用 GitHub 登录' }, 401) }
+  if (!user) return { response: json({ error: '请先登录 NSTrans 账号' }, 401) }
   if (admin && user.role !== 'admin') return { response: json({ error: '需要管理员权限' }, 403) }
   if (request.method !== 'GET' && !sameOrigin(request, env)) return { response: json({ error: '来源校验失败' }, 403) }
   return { user }
@@ -310,7 +448,7 @@ async function revokeKey(request, env, id) {
 }
 
 async function listGames(request, env) {
-  const { results } = await env.DB.prepare(`SELECT g.*,u.login submitter FROM games g LEFT JOIN users u ON u.id=g.submitted_by
+  const { results } = await env.DB.prepare(`SELECT g.*,COALESCE(u.username,u.login) submitter FROM games g LEFT JOIN users u ON u.id=g.submitted_by
     WHERE g.status='approved' ORDER BY g.created_at DESC`).all()
   return json({ games: results })
 }
@@ -582,7 +720,7 @@ async function uploadContributions(request, env) {
 async function apiKeyUser(request, env) {
   const header = request.headers.get('authorization') || '', raw = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
   if (!raw) return { response: json({ error: '缺少客户端 API Key' }, 401) }
-  const user = await env.DB.prepare(`SELECT u.id,u.login,u.role,k.id key_id FROM api_keys k JOIN users u ON u.id=k.user_id
+  const user = await env.DB.prepare(`SELECT u.id,COALESCE(u.username,u.login) login,u.role,k.id key_id FROM api_keys k JOIN users u ON u.id=k.user_id
     WHERE k.key_hash=? AND k.revoked_at IS NULL`).bind(await sha256(raw)).first()
   if (!user) return { response: json({ error: 'API Key 无效或已撤销' }, 401) }
   await env.DB.prepare('UPDATE api_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?').bind(user.key_id).run()
@@ -635,4 +773,5 @@ function cookies(request) { return Object.fromEntries((request.headers.get('cook
 function cookie(name, value, maxAge) { return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}` }
 function randomToken(bytes) { const data = new Uint8Array(bytes); crypto.getRandomValues(data); return btoa(String.fromCharCode(...data)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/gu, '') }
 async function sha256(value) { const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value))); return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('') }
+async function hmacSha256(value, secret) { const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']); return bytesBase64url(new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(value)))) }
 function safeEqual(a, b) { if (a.length !== b.length) return false; let result = 0; for (let index = 0; index < a.length; index++) result |= a.charCodeAt(index) ^ b.charCodeAt(index); return result === 0 }

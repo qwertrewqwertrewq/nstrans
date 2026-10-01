@@ -22,6 +22,8 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   OLLAMA_VERSION: 0.12.3
   WINDOWS_OLLAMA_VERSION: 0.33.3
+  CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
+  CLIENT_BUILD_KEY_ID: nstrans-release-2026-01
 
 jobs:
   prepare:
@@ -102,8 +104,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-assets
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform macos --variant with-llama)"
           npm run desktop:build:full
           cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64.dmg "release-assets/NSTrans-${RELEASE_TAG#v}-macOS-arm64-WithLlama.dmg"
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform macos --variant remote-only)"
           npm run desktop:build:remote
           cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64_remote-only.dmg "release-assets/NSTrans-${RELEASE_TAG#v}-macOS-arm64-RemoteOnly.dmg"
           cd release-assets
@@ -146,8 +150,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-assets
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant with-llama)"
           npm run ios:build:with-llama
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-arm64-unsigned-WithLlama.ipa"
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant remote-only)"
           npm run ios:build:remote
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-arm64-unsigned-RemoteOnly.ipa"
           cd release-assets
@@ -202,8 +208,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-assets
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant with-llama)"
           npm run android:build:with-llama
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk"
+          export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant remote-only)"
           npm run android:build:remote
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-RemoteOnly.apk"
           with_apk="release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk"
@@ -304,11 +312,13 @@ jobs:
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force release-assets | Out-Null
           $Version = $env:RELEASE_TAG.TrimStart('v')
+          $env:NSTRANS_BUILD_ATTESTATION = node scripts/sign-client-build.mjs --platform windows --variant with-llama
           npm run windows:build:full
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop | Select-Object -First 1
           if (-not $Source) { throw "WithLlama NSIS installer was not produced." }
           Copy-Item $Source.FullName "release-assets/NSTrans-$Version-Windows-x64-WithLlama-setup.exe"
+          $env:NSTRANS_BUILD_ATTESTATION = node scripts/sign-client-build.mjs --platform windows --variant remote-only
           npm run windows:build:remote
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $Source = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" -ErrorAction Stop | Select-Object -First 1

@@ -63,6 +63,20 @@ fn client_platform() -> &'static str {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ClientBuildAttestation {
+  available: bool,
+  version: &'static str,
+  attestation: Option<&'static str>,
+}
+
+#[tauri::command]
+fn client_build_attestation() -> ClientBuildAttestation {
+  let attestation = option_env!("NSTRANS_BUILD_ATTESTATION").filter(|value| !value.is_empty());
+  ClientBuildAttestation { available: attestation.is_some(), version: env!("CARGO_PKG_VERSION"), attestation }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GeneratedTranslation { translation: String }
 
 #[derive(Debug, Serialize)]
@@ -1038,7 +1052,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .manage(MeikiState(Arc::new(Mutex::new(None))))
     .manage(tv_cast::TvCastState::new())
-    .invoke_handler(tauri::generate_handler![client_platform, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, nllb::nllb_status, nllb::nllb_install, entity_web_search, machine_translation_page, qwen_flash_request, tv_cast::tv_cast_devices, tv_cast::tv_cast_connect, tv_cast::tv_cast_status, tv_cast::tv_cast_push, tv_cast::tv_cast_disconnect])
+    .invoke_handler(tauri::generate_handler![client_platform, client_build_attestation, mac_translation_status, mac_translate, mac_vision_ocr, meiki_ocr, meiki_ocr_unload, usb_video_devices, usb_video_open, usb_video_close, usb_video_frame, translategemma_status, translategemma_install, translategemma_install_url, translategemma_import_file, translategemma_pick_file, translategemma_generate, translategemma_unload, translategemma_backend_status, translategemma_set_backend, nllb::nllb_status, nllb::nllb_install, entity_web_search, machine_translation_page, qwen_flash_request, tv_cast::tv_cast_devices, tv_cast::tv_cast_connect, tv_cast::tv_cast_status, tv_cast::tv_cast_push, tv_cast::tv_cast_disconnect])
     .setup(|app| {
       app.manage(nllb::NllbState::new(app.handle()).map_err(std::io::Error::other)?);
       #[cfg(not(any(target_os = "android", target_os = "ios")))]

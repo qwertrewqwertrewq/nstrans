@@ -32,6 +32,7 @@
   "vars": {
     "SITE_ORIGIN": "https://nstrans.221129.xyz",
     "ADMIN_GITHUB_LOGINS": "qwertrewqwertrewq",
-    "LICENSE_NAME": "CC BY 4.0"
+    "LICENSE_NAME": "CC BY 4.0",
+    "CLIENT_MIN_VERSION": "0.1.4"
   }
 }
