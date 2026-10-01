@@ -22,7 +22,6 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   OLLAMA_VERSION: 0.12.3
   WINDOWS_OLLAMA_VERSION: 0.33.3
-  CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
   CLIENT_BUILD_KEY_ID: nstrans-release-2026-01
 
 jobs:
@@ -101,6 +100,8 @@ jobs:
           ./scripts/setup-macos-runtime.sh "$OLLAMA_VERSION"
 
       - name: Build and stage both DMGs
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         shell: bash
         run: |
           mkdir -p release-assets
@@ -147,6 +148,8 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build and stage both unsigned IPAs
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         shell: bash
         run: |
           mkdir -p release-assets
@@ -205,6 +208,8 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build and stage both APKs
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         shell: bash
         run: |
           mkdir -p release-assets
@@ -307,6 +312,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build and stage both NSIS installers
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"

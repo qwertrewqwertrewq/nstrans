@@ -15,7 +15,6 @@ concurrency:
 env:
   OLLAMA_VERSION: 0.12.3
   WINDOWS_OLLAMA_VERSION: 0.33.3
-  CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
   CLIENT_BUILD_KEY_ID: nstrans-release-2026-01
 
 jobs:
@@ -41,12 +40,16 @@ jobs:
           npm ci --ignore-scripts
           ./scripts/setup-macos-runtime.sh "$OLLAMA_VERSION"
       - name: Build WithLlama DMG
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform macos --variant with-llama)"
           npm run desktop:build:full
           mkdir -p artifacts/WithLlama
           cp src-tauri/target/release/bundle/dmg/NSTrans_*_aarch64.dmg artifacts/WithLlama/NSTrans-macOS-arm64-WithLlama.dmg
       - name: Build RemoteOnly DMG
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform macos --variant remote-only)"
           npm run desktop:build:remote
@@ -81,12 +84,16 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Build WithLlama unsigned IPA
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant with-llama)"
           npm run ios:build:with-llama
           mkdir -p artifacts/WithLlama
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa artifacts/WithLlama/NSTrans-iPadOS-arm64-unsigned-WithLlama.ipa
       - name: Build RemoteOnly unsigned IPA
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant remote-only)"
           npm run ios:build:remote
@@ -131,12 +138,16 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Build WithLlama APK
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant with-llama)"
           npm run android:build:with-llama
           mkdir -p artifacts/WithLlama
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/WithLlama/NSTrans-Android-arm64-debug-WithLlama.apk
       - name: Build RemoteOnly APK
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant remote-only)"
           npm run android:build:remote
@@ -218,6 +229,8 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:WINDOWS_OLLAMA_VERSION -NoLlama
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build RemoteOnly installer
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -241,6 +254,8 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows-runtime.ps1 -OllamaVersion $env:WINDOWS_OLLAMA_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build WithLlama installer
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
