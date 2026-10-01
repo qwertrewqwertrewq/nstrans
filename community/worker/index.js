@@ -67,8 +67,13 @@ async function route(request, env) {
   if (path === '/auth/github') return startGithubAuth(request, env)
   if (path === '/auth/github/callback') return githubCallback(request, env)
   if (path === '/auth/client' && request.method === 'GET') return consumeClientTicket(request, env)
+  if (path === '/auth/client/github' && request.method === 'GET') return beginClientGithubAuth(request, env)
   if (path === '/auth/logout') return logout(request, env)
   if (path === '/api/v1/auth/client/ticket' && request.method === 'POST') return cors(await createClientTicket(request, env))
+  if (path === '/api/v1/auth/client/start' && request.method === 'POST') return cors(await startClientAuth(request, env))
+  if (path === '/api/v1/auth/client/poll' && request.method === 'POST') return cors(await pollClientAuth(request, env))
+  if (path === '/api/v1/auth/client/login' && request.method === 'POST') return cors(await nativeClientLogin(request, env))
+  if (path === '/api/v1/auth/client/register' && request.method === 'POST') return cors(await nativeClientRegister(request, env))
   if (path === '/api/client/register' && request.method === 'POST') return clientRegister(request, env)
   if (path === '/api/client/login' && request.method === 'POST') return clientLogin(request, env)
   if (path === '/api/account/profile' && request.method === 'PATCH') return updateAccountProfile(request, env)
@@ -100,7 +105,7 @@ async function route(request, env) {
   if (path.startsWith('/download/file/')) return downloadFile(request, env, path.slice('/download/file/'.length))
   if (path.startsWith('/download/model/')) return downloadModel(request, path.slice('/download/model/'.length))
   if (path === '/download/model-notice') return modelNotice()
-  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/client-login') return servePage(request, env)
+  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/client-login' || path === '/client-auth-complete') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
 }
 
@@ -235,7 +240,8 @@ async function syncLatestRelease(env) {
 
 async function startGithubAuth(request, env) {
   if (!env.GITHUB_CLIENT_ID) return json({ error: 'GitHub OAuth 尚未配置' }, 503)
-  const intent = new URL(request.url).searchParams.get('intent') === 'bind' ? 'bind' : 'login'
+  const requestedIntent = new URL(request.url).searchParams.get('intent')
+  const intent = requestedIntent === 'bind' || requestedIntent === 'client' ? requestedIntent : 'login'
   const state = randomToken(24), callback = `${env.SITE_ORIGIN}/auth/github/callback`
   const target = new URL('https://github.com/login/oauth/authorize')
   target.search = new URLSearchParams({ client_id: env.GITHUB_CLIENT_ID, redirect_uri: callback, scope: 'read:user', state }).toString()
@@ -273,11 +279,111 @@ async function githubCallback(request, env) {
     ON CONFLICT(github_id) DO UPDATE SET login=excluded.login, avatar_url=excluded.avatar_url,
     github_login=excluded.github_login,role=CASE WHEN excluded.role='admin' THEN 'admin' ELSE users.role END, updated_at=CURRENT_TIMESTAMP`).bind(profile.id, profile.login, initialUsername, profile.login, profile.avatar_url || '', role).run()
   const user = await env.DB.prepare('SELECT id FROM users WHERE github_id=?').bind(profile.id).first()
+  if (intent === 'client') {
+    const result = await completeClientAuthFlow(request, env, user.id)
+    if (result) return result
+    return json({ error: '客户端授权会话无效或已过期' }, 401)
+  }
   const raw = randomToken(32), hash = await sha256(raw)
   await env.DB.batch([env.DB.prepare('DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP'), env.DB.prepare("INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,datetime('now','+30 days'))").bind(hash, user.id)])
   const headers = new Headers({ location: `${env.SITE_ORIGIN}/dashboard` }); headers.append('set-cookie', cookie('session', raw, 30 * 86400)); headers.append('set-cookie', cookie('oauth_state', '', 0)); headers.append('set-cookie', cookie('oauth_intent', '', 0))
   return new Response(null, { status: 302, headers })
 }
+
+async function startClientAuth(request, env) {
+  const body = await readJson(request)
+  let build
+  try { build = await verifyClientBuild(body.attestation, env) }
+  catch (error) { return json({ error: error.message || '客户端构建凭证无效' }, 401) }
+  const deviceId = clean(body.deviceId, 80), deviceName = clean(body.deviceName, 120) || `${build.platform || 'NSTrans'} 客户端`
+  if (!deviceId) return json({ error: '缺少客户端设备标识' }, 400)
+  const browserToken = randomToken(32), pollToken = randomToken(32)
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM client_auth_flows WHERE expires_at<=CURRENT_TIMESTAMP OR claimed_at IS NOT NULL'),
+    env.DB.prepare("INSERT INTO client_auth_flows(browser_token_hash,poll_token_hash,build_version,platform,variant,device_id,device_name,expires_at) VALUES(?,?,?,?,?,?,?,datetime('now','+10 minutes'))").bind(await sha256(browserToken), await sha256(pollToken), build.version, build.platform || '', build.variant || '', deviceId, deviceName),
+  ])
+  return json({ browserUrl: `${env.SITE_ORIGIN}/auth/client/github?code=${encodeURIComponent(browserToken)}`, pollToken, expiresIn: 600, build })
+}
+
+async function beginClientGithubAuth(request, env) {
+  const raw = new URL(request.url).searchParams.get('code') || ''
+  const hash = await sha256(raw)
+  const flow = raw && await env.DB.prepare('SELECT browser_token_hash FROM client_auth_flows WHERE browser_token_hash=? AND browser_started_at IS NULL AND completed_at IS NULL AND expires_at>CURRENT_TIMESTAMP').bind(hash).first()
+  if (!flow) return json({ error: '客户端 GitHub 授权链接无效或已过期' }, 401)
+  await env.DB.prepare('UPDATE client_auth_flows SET browser_started_at=CURRENT_TIMESTAMP WHERE browser_token_hash=?').bind(hash).run()
+  const headers = new Headers({ location: `${env.SITE_ORIGIN}/auth/github?intent=client` })
+  headers.append('set-cookie', cookie('client_flow', raw, 600))
+  return new Response(null, { status: 302, headers })
+}
+
+async function completeClientAuthFlow(request, env, userId) {
+  const raw = cookies(request).client_flow || ''
+  if (!raw) return null
+  const hash = await sha256(raw)
+  const flow = await env.DB.prepare('SELECT device_id,device_name FROM client_auth_flows WHERE browser_token_hash=? AND completed_at IS NULL AND expires_at>CURRENT_TIMESTAMP').bind(hash).first()
+  if (!flow) return null
+  const apiKey = await issueClientApiKey(env, userId, flow.device_id, flow.device_name)
+  const encrypted = await encryptTemporarySecret(apiKey, env.CLIENT_ACCESS_SECRET)
+  await env.DB.prepare('UPDATE client_auth_flows SET user_id=?,encrypted_api_key=?,encryption_iv=?,completed_at=CURRENT_TIMESTAMP WHERE browser_token_hash=?').bind(userId, encrypted.value, encrypted.iv, hash).run()
+  const headers = new Headers({ location: `${env.SITE_ORIGIN}/client-auth-complete` })
+  headers.append('set-cookie', cookie('client_flow', '', 0)); headers.append('set-cookie', cookie('oauth_state', '', 0)); headers.append('set-cookie', cookie('oauth_intent', '', 0))
+  return new Response(null, { status: 302, headers })
+}
+
+async function pollClientAuth(request, env) {
+  const pollToken = clean((await readJson(request)).pollToken, 100)
+  if (!pollToken) return json({ error: '缺少客户端轮询凭证' }, 400)
+  const hash = await sha256(pollToken)
+  const flow = await env.DB.prepare('SELECT encrypted_api_key,encryption_iv,completed_at,claimed_at,expires_at FROM client_auth_flows WHERE poll_token_hash=?').bind(hash).first()
+  if (!flow || Date.parse(`${flow.expires_at}Z`) <= Date.now()) return json({ status: 'expired', error: '授权会话已过期' }, 410)
+  if (flow.claimed_at) return json({ status: 'claimed', error: '授权结果已经领取' }, 410)
+  if (!flow.completed_at || !flow.encrypted_api_key) return json({ status: 'pending' }, 202)
+  const apiKey = await decryptTemporarySecret(flow.encrypted_api_key, flow.encryption_iv, env.CLIENT_ACCESS_SECRET)
+  await env.DB.prepare('UPDATE client_auth_flows SET claimed_at=CURRENT_TIMESTAMP,encrypted_api_key=NULL,encryption_iv=NULL WHERE poll_token_hash=? AND claimed_at IS NULL').bind(hash).run()
+  return json({ status: 'complete', apiKey })
+}
+
+async function nativeClientLogin(request, env) {
+  const body = await readJson(request)
+  try { await verifyClientBuild(body.attestation, env) }
+  catch (error) { return json({ error: error.message || '客户端构建凭证无效' }, 401) }
+  const username = clean(body.username, 32), password = typeof body.password === 'string' ? body.password : ''
+  const user = await env.DB.prepare('SELECT id,password_hash,password_salt,password_iterations FROM users WHERE username=? COLLATE NOCASE').bind(username).first()
+  if (!user?.password_hash || !(await verifyPassword(password, user))) return json({ error: '用户名或密码错误' }, 401)
+  const apiKey = await issueClientApiKey(env, user.id, clean(body.deviceId, 80), clean(body.deviceName, 120))
+  return json({ apiKey, username })
+}
+
+async function nativeClientRegister(request, env) {
+  const body = await readJson(request)
+  try { await verifyClientBuild(body.attestation, env) }
+  catch (error) { return json({ error: error.message || '客户端构建凭证无效' }, 401) }
+  const username = clean(body.username, 32), password = typeof body.password === 'string' ? body.password : ''
+  const invalid = validateCredentials(username, password); if (invalid) return json({ error: invalid }, 400)
+  if (await env.DB.prepare('SELECT id FROM users WHERE username=? COLLATE NOCASE').bind(username).first()) return json({ error: '用户名已被使用' }, 409)
+  const passwordData = await hashPassword(password)
+  let githubId
+  do { githubId = -Math.floor(1 + Math.random() * Number.MAX_SAFE_INTEGER) } while (await env.DB.prepare('SELECT id FROM users WHERE github_id=?').bind(githubId).first())
+  const result = await env.DB.prepare('INSERT INTO users(github_id,login,username,avatar_url,role,password_hash,password_salt,password_iterations) VALUES(?,?,?,?,?,?,?,?)').bind(githubId, username, username, '', 'user', passwordData.hash, passwordData.salt, passwordData.iterations).run()
+  const apiKey = await issueClientApiKey(env, result.meta.last_row_id, clean(body.deviceId, 80), clean(body.deviceName, 120))
+  return json({ apiKey, username }, 201)
+}
+
+async function issueClientApiKey(env, userId, deviceId, deviceName) {
+  const resolvedDeviceId = deviceId || randomToken(16), resolvedDeviceName = deviceName || 'NSTrans 客户端'
+  await env.DB.prepare("UPDATE api_keys SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND device_id=? AND origin='official-client' AND revoked_at IS NULL").bind(userId, resolvedDeviceId).run()
+  const raw = `nst_live_${randomToken(24)}`, prefix = raw.slice(0, 17)
+  await env.DB.prepare("INSERT INTO api_keys(user_id,key_prefix,key_hash,origin,device_id,device_name) VALUES(?,?,?,?,?,?)").bind(userId, prefix, await sha256(raw), 'official-client', resolvedDeviceId, resolvedDeviceName).run()
+  return raw
+}
+
+async function temporaryEncryptionKey(secret) {
+  if (!secret) throw new Error('客户端账号服务尚未完成配置')
+  const material = await crypto.subtle.digest('SHA-256', encoder.encode(`nstrans-client-flow:${secret}`))
+  return crypto.subtle.importKey('raw', material, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+}
+async function encryptTemporarySecret(value, secret) { const iv = crypto.getRandomValues(new Uint8Array(12)); const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await temporaryEncryptionKey(secret), encoder.encode(value)); return { value: bytesBase64url(new Uint8Array(encrypted)), iv: bytesBase64url(iv) } }
+async function decryptTemporarySecret(value, iv, secret) { const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64urlBytes(iv) }, await temporaryEncryptionKey(secret), base64urlBytes(value)); return new TextDecoder().decode(decrypted) }
 
 async function createClientTicket(request, env) {
   const body = await readJson(request)
@@ -428,7 +534,7 @@ async function publicStats(env) {
 
 async function listKeys(request, env) {
   const auth = await requireUser(request, env); if (auth.response) return auth.response
-  const { results } = await env.DB.prepare('SELECT id,key_prefix,created_at,last_used_at FROM api_keys WHERE user_id=? AND revoked_at IS NULL ORDER BY id DESC').bind(auth.user.id).all()
+  const { results } = await env.DB.prepare('SELECT id,key_prefix,origin,device_name,created_at,last_used_at FROM api_keys WHERE user_id=? AND revoked_at IS NULL ORDER BY id DESC').bind(auth.user.id).all()
   return json({ keys: results })
 }
 

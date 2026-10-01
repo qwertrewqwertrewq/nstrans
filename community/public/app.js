@@ -75,7 +75,7 @@ function renderMetrics(stats) {
 
 async function loadKeys() {
   const { keys } = await api('/api/keys')
-  $('#keyList').innerHTML = keys.length ? keys.map((key) => `<div class="list-row"><div><strong>${escapeHtml(key.key_prefix)}••••</strong><small>创建于 ${date(key.created_at)}${key.last_used_at ? ` · 最近使用 ${date(key.last_used_at)}` : ' · 尚未使用'}</small></div><button data-revoke="${key.id}" class="danger-link">撤销</button></div>`).join('') : '<div class="empty-state">尚未生成客户端 Key</div>'
+  $('#keyList').innerHTML = keys.length ? keys.map((key) => `<div class="list-row"><div><strong>${key.origin === 'official-client' ? `${escapeHtml(key.device_name || 'NSTrans 官方客户端')} · ` : ''}${escapeHtml(key.key_prefix)}••••</strong><small>${key.origin === 'official-client' ? '由客户端登录自动配置 · ' : ''}创建于 ${date(key.created_at)}${key.last_used_at ? ` · 最近使用 ${date(key.last_used_at)}` : ' · 尚未使用'}</small></div><button data-revoke="${key.id}" class="danger-link">撤销</button></div>`).join('') : '<div class="empty-state">尚未生成客户端 Key</div>'
   $$('[data-revoke]').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('撤销后，使用此 Key 的客户端将立即无法上传。确定吗？')) return
     await api(`/api/keys/${button.dataset.revoke}`, { method: 'DELETE' })

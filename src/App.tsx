@@ -29,7 +29,8 @@ import { RemoteModelManager } from './components/RemoteModelManager'
 import { buildTvImagePayload, buildTvTextPayload, connectTv, disconnectTv, listTvDevices, pushTvOverlay, tvConnectionStatus, type TvCastMode, type TvConnectionStatus, type TvDevice } from './services/tvCast'
 import { findCaptureAudioDevice, openPreferredVideoStream, waitForVideoDimensions, type CaptureDeviceDescriptor } from './services/mediaCapture'
 import { SetupWizard } from './components/SetupWizard'
-import { officialBuildInfo, openOfficialClientLogin, type OfficialBuildInfo } from './services/communityAccount'
+import { officialBuildInfo, type OfficialBuildInfo } from './services/communityAccount'
+import { CommunityAccountAccess } from './components/CommunityAccountAccess'
 
 const emptyLatency: LatencySample = {
   capture: 0,
@@ -245,7 +246,6 @@ function App() {
   const [communityApiKey, setCommunityApiKey] = useState(loadCommunityApiKey()),
     [dictionaryStatus, setDictionaryStatus] = useState(() => knowledgeServices.dictionaries.status(defaultRoutingSettings.gameId))
   const [officialBuild, setOfficialBuild] = useState<OfficialBuildInfo>({ available: false, version: '—' })
-  const [accountLoginStatus, setAccountLoginStatus] = useState('')
   const [communityGameProfiles, setCommunityGameProfiles] = useState<GameProfile[]>(loadCommunityGameProfiles)
   const [dictionaryReady, setDictionaryReady] = useState(false)
   const [communityStatus, setCommunityStatus] = useState('')
@@ -1681,6 +1681,7 @@ function App() {
                 nllbStatus={nllbStatus}
                 sharingEnabled={sharingEnabled}
                 communityApiKey={communityApiKey}
+                officialBuild={officialBuild}
                 games={availableGames}
                 onThemeChange={setUiTheme}
                 onRoutingChange={updateRoutingMode}
@@ -2105,7 +2106,7 @@ function App() {
                 </div>
                 {sharingEnabled && (
                   <div className="community-key-row single">
-                    <input type="password" value={communityApiKey} onChange={(event) => updateCommunityApiKey(event.target.value)} placeholder="粘贴 nst_live_… API Key" aria-label="社区 API Key" />
+                    <button className="secondary" onClick={() => selectPanel('keys')}>{communityApiKey ? '社区账号已连接' : '前往密钥管理登录社区账号'}</button>
                   </div>
                 )}
               </div>
@@ -2245,12 +2246,8 @@ function App() {
           )}
           {activePanel === 'keys' && (
             <ControlPanel title="密钥管理" icon={<KeyRound size={16} />}>
-              <div className="credential-group">
-                <label>NSTrans 社区账号</label>
-                <div className="notice">{officialBuild.available ? `官方构建 ${officialBuild.version} · ${officialBuild.platform ?? '未知平台'} · ${officialBuild.variant === 'with-llama' ? 'WithLlama' : 'RemoteOnly'} · 签名 ${officialBuild.issuedAt ? new Date(officialBuild.issuedAt).toLocaleString() : '—'} · 到期 ${officialBuild.expiresAt ? new Date(officialBuild.expiresAt).toLocaleString() : '—'}` : `当前版本 ${officialBuild.version} 未包含官方构建签名；本地开发构建不能使用客户端账号入口。`}</div>
-                <button className="secondary" disabled={!officialBuild.available} onClick={async () => { try { setAccountLoginStatus('正在验证官方构建…'); await openOfficialClientLogin(communityOrigin, officialBuild); setAccountLoginStatus('已在浏览器打开登录页面') } catch (reason) { setAccountLoginStatus(errorMessage(reason, '无法打开社区登录')) } }}>登录或注册社区账号</button>
-                {accountLoginStatus && <small className="muted">{accountLoginStatus}</small>}
-              </div>
+              <CommunityAccountAccess origin={communityOrigin} build={officialBuild} connected={Boolean(communityApiKey)} onApiKey={updateCommunityApiKey} onDisconnect={() => updateCommunityApiKey('')} />
+              <div className="notice">{officialBuild.available ? `官方构建 ${officialBuild.version} · ${officialBuild.platform ?? '未知平台'} · ${officialBuild.variant === 'with-llama' ? 'WithLlama' : 'RemoteOnly'} · 签名 ${officialBuild.issuedAt ? new Date(officialBuild.issuedAt).toLocaleString() : '—'} · 到期 ${officialBuild.expiresAt ? new Date(officialBuild.expiresAt).toLocaleString() : '—'}` : `当前版本 ${officialBuild.version} 未包含官方构建签名。`}</div>
               <div className="credential-group">
                 <label>Brave Search API Key</label>
                 <input type="password" value={routing.entitySearch.braveApiKey} onChange={(event) => updateEntitySearch({ braveApiKey: event.target.value })} placeholder="用于 Brave Search 名词查询（可选）" aria-label="Brave Search API Key" autoComplete="off" />
@@ -2258,12 +2255,7 @@ function App() {
                 <input type="password" value={routing.entitySearch.qianfanApiKey} onChange={(event) => updateEntitySearch({ qianfanApiKey: event.target.value })} placeholder="用于百度千帆名词查询（可选）" aria-label="百度千帆 API Key" autoComplete="off" />
               </div>
               <RemoteModelManager settings={routing.entitySearch} onChange={updateEntitySearch} mode="credentials" />
-              <div className="credential-group">
-                <label>社区词库客户端 API Key</label>
-                <input type="password" value={communityApiKey} onChange={(event) => updateCommunityApiKey(event.target.value)} placeholder="nst_live_…" aria-label="社区 API Key" autoComplete="off" />
-                <small className="muted">输入时自动保存在本机；在“名词搜索”开启共享后，待共享词条会自动上传。</small>
-              </div>
-              <small className="muted">所有 API Key 与自定义端点只保存在当前设备。搜索策略、模型选择和提示词请在“名词搜索”中设置。</small>
+              <small className="muted">社区账号登录成功后会自动签发并保存设备密钥，不会显示或要求复制。其他 API Key 与自定义端点仍只保存在当前设备。</small>
             </ControlPanel>
           )}
           {activePanel === 'overlay' && (

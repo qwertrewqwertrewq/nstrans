@@ -44,6 +44,13 @@ set a password and custom username in “账号与绑定”. This build certific
 distribution-origin check, not device-bound attestation; future versions can
 replace it with Apple App Attest, Play Integrity, or platform signing checks.
 
+Official clients use `/api/v1/auth/client/login` and `register` for native
+username/password access. GitHub authorization uses the short-lived
+`start`/`poll` device flow: the browser never exposes the API key, and the
+client receives it exactly once after OAuth succeeds. A generated key is bound
+to the local device ID; signing in again on that device revokes and replaces
+only its previous key.
+
 Deploy schema and Worker:
 
 ```bash
