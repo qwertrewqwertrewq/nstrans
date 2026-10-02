@@ -7,3 +7,4 @@
 .account-panels{grid-template-columns:repeat(3,minmax(0,1fr))}.account-panels .panel{display:flex;flex-direction:column;gap:15px}.account-panels .panel p{color:var(--muted);font-size:12px;line-height:1.6;min-height:38px}.account-panels .button{margin-top:auto}
 @media(max-width:850px){.account-panels{grid-template-columns:1fr}.account-auth h1{font-size:38px}}
 .client-auth-complete{text-align:center;padding:55px}.client-auth-complete img{width:72px;height:72px}.client-auth-complete p{max-width:560px;margin:0 auto;color:var(--muted);line-height:1.8}
+[hidden]{display:none!important}

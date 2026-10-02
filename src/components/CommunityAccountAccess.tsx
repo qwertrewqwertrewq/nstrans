@@ -42,7 +42,7 @@ export function CommunityAccountAccess({ origin, build, connected, onApiKey, onD
       <div><strong>{connected ? '此设备已登录社区' : '登录 NSTrans 社区'}</strong><small>{connected ? '社区客户端密钥已安全保存在本机，不会在界面中显示。' : '登录后自动配置词库上传和游戏创建权限。'}</small></div>
       {connected && onDisconnect && <button className="text-button" onClick={onDisconnect}>退出此设备</button>}
     </div>
-    {!build.available ? <div className="notice">当前安装包没有官方构建签名，无法使用客户端账号登录。请安装 GitHub Actions 发布的正式客户端。</div> : <>
+    {connected ? null : !build.available ? <div className="notice">当前安装包没有官方构建签名，无法使用客户端账号登录。请安装 GitHub Actions 发布的正式客户端。</div> : <>
       <div className="segmented community-auth-tabs"><button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}><LogIn size={14} />登录</button><button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}><UserPlus size={14} />注册</button></div>
       <div className="community-password-auth"><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="用户名" maxLength={32} autoComplete="username" /><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === 'register' ? '密码（至少 10 位）' : '密码'} minLength={mode === 'register' ? 10 : undefined} maxLength={128} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} /><button className="primary" disabled={busy || username.trim().length < 3 || password.length < (mode === 'register' ? 10 : 1)} onClick={() => void submitPassword()}>{busy ? '处理中…' : mode === 'login' ? '登录并自动配置' : '注册并自动配置'}</button></div>
       <div className="community-auth-divider"><span>或</span></div>

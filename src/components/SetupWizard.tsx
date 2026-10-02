@@ -80,7 +80,7 @@ export function SetupWizard(props: SetupWizardProps) {
   const [translationChoice, setTranslationChoice] = useState<TranslationChoice>(() => props.routing.coreTranslationEngine === 'remote' ? 'remote' : props.routing.coreTranslationEngine === 'machine' && props.routing.machineTranslationProvider !== 'nllb-600m' ? 'web' : 'local')
   const [localChoice, setLocalChoice] = useState<LocalTranslationChoice>(() => props.routing.coreTranslationEngine === 'machine' ? 'machine' : 'llm')
   const [downloadStarted, setDownloadStarted] = useState(false)
-  const [shareChoice, setShareChoice] = useState<'yes' | 'no'>(() => props.sharingEnabled ? 'yes' : 'no')
+  const [shareChoice, setShareChoice] = useState<'yes' | 'no' | null>(() => props.sharingEnabled || props.communityApiKey.trim() ? 'yes' : null)
   const [newGameOpen, setNewGameOpen] = useState(false)
   const [newGameChineseName, setNewGameChineseName] = useState('')
   const [newGameJapaneseName, setNewGameJapaneseName] = useState('')
@@ -99,7 +99,7 @@ export function SetupWizard(props: SetupWizardProps) {
     : step === 3
       ? !props.routing.entityLookupEnabled || engineReady(props.routing.entitySearch.primary, props.routing.entitySearch) && engineReady(props.routing.entitySearch.fallback, props.routing.entitySearch) && (!props.routing.entitySearch.visionFallbackEnabled || Boolean(props.routing.entitySearch.qwenApiKey.trim() && visionModels.some((model) => model.id === props.routing.entitySearch.visionModelId)))
       : step === 4
-        ? shareChoice === 'no' || Boolean(props.communityApiKey.trim())
+        ? shareChoice === 'no' || shareChoice === 'yes' && Boolean(props.communityApiKey.trim())
         : true
 
   const chooseTranslation = (choice: TranslationChoice) => {
@@ -120,7 +120,10 @@ export function SetupWizard(props: SetupWizardProps) {
   }
   const next = () => {
     if (!stepValid) return
-    if (step === 4) props.onSharingChange(shareChoice === 'yes')
+    if (step === 4) {
+      if (shareChoice === 'yes' && !props.communityApiKey.trim()) return
+      props.onSharingChange(shareChoice === 'yes')
+    }
     if (step < 6) setStep((value) => value + 1)
   }
   const createGame = async () => {

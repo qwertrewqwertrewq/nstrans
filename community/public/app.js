@@ -19,7 +19,7 @@ async function loadHomeStats() {
   } catch { /* Keep graceful placeholders. */ }
 }
 
-const routeNames = { overview: '概览', keys: '客户端密钥', games: '游戏管理', dictionary: '词库与评分', account: '账号与绑定' }
+const routeNames = { overview: '概览', keys: '客户端密钥', games: '游戏管理', dictionary: '词库与评分', account: '账号与绑定', updates: '版本通知' }
 let dashboardUser = null
 let dashboardGames = []
 let dictionaryTerms = []
@@ -50,13 +50,45 @@ async function initDashboard() {
     $('#login').textContent = `@${user.login}`
     $('#roleBadge').textContent = user.role === 'admin' ? '管理员' : '贡献者'
     $('#welcomeName').textContent = user.login
+    $$('[data-admin-only]').forEach((element) => { element.hidden = user.role !== 'admin' })
+    if (route === 'updates' && user.role !== 'admin') { location.href = '/dashboard'; return }
     renderMetrics(stats)
     setupGameForm()
     if (route === 'keys') { $('#createKey').addEventListener('click', createKey); await loadKeys() }
     if (route === 'games') renderGames(dashboardGames)
     if (route === 'dictionary') setupDictionary(dashboardGames)
     if (route === 'account') setupAccount(user)
+    if (route === 'updates') await setupUpdatePolicy()
   } catch { location.href = '/auth/github' }
+}
+
+async function setupUpdatePolicy() {
+  const form = $('#updatePolicyForm'), { policy } = await api('/api/admin/update-policy')
+  form.elements.targetVersion.value = policy?.target_version || '0.1.5'
+  form.elements.downloadUrl.value = policy?.download_url || `${location.origin}/download`
+  form.elements.popupEnabled.checked = Boolean(policy?.popup_enabled)
+  form.elements.forceUpdate.checked = Boolean(policy?.force_update)
+  form.elements.content.value = policy?.content || ''
+  const syncForceState = () => {
+    if (form.elements.forceUpdate.checked) form.elements.popupEnabled.checked = true
+    form.elements.popupEnabled.disabled = form.elements.forceUpdate.checked
+  }
+  syncForceState()
+  form.elements.forceUpdate.addEventListener('change', syncForceState)
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    try {
+      await api('/api/admin/update-policy', { method: 'PATCH', body: JSON.stringify({
+        targetVersion: form.elements.targetVersion.value,
+        downloadUrl: form.elements.downloadUrl.value,
+        popupEnabled: form.elements.popupEnabled.checked,
+        forceUpdate: form.elements.forceUpdate.checked,
+        content: form.elements.content.value,
+      }) })
+      flash('客户端版本规则已保存')
+      syncForceState()
+    } catch (error) { flash(error.message, true) }
+  })
 }
 
 function setupAccount(user) {

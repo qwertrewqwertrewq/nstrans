@@ -31,6 +31,8 @@ import { findCaptureAudioDevice, openPreferredVideoStream, waitForVideoDimension
 import { SetupWizard } from './components/SetupWizard'
 import { officialBuildInfo, type OfficialBuildInfo } from './services/communityAccount'
 import { CommunityAccountAccess } from './components/CommunityAccountAccess'
+import { ClientUpdatePrompt } from './components/ClientUpdatePrompt'
+import { fetchClientUpdatePolicy, type ClientUpdatePolicy } from './services/clientUpdate'
 
 const emptyLatency: LatencySample = {
   capture: 0,
@@ -246,6 +248,7 @@ function App() {
   const [communityApiKey, setCommunityApiKey] = useState(loadCommunityApiKey()),
     [dictionaryStatus, setDictionaryStatus] = useState(() => knowledgeServices.dictionaries.status(defaultRoutingSettings.gameId))
   const [officialBuild, setOfficialBuild] = useState<OfficialBuildInfo>({ available: false, version: '—' })
+  const [clientUpdate, setClientUpdate] = useState<ClientUpdatePolicy | null>(null)
   const [communityGameProfiles, setCommunityGameProfiles] = useState<GameProfile[]>(loadCommunityGameProfiles)
   const [dictionaryReady, setDictionaryReady] = useState(false)
   const [communityStatus, setCommunityStatus] = useState('')
@@ -313,7 +316,14 @@ function App() {
   }, [])
 
   useEffect(() => {
-    void officialBuildInfo().then(setOfficialBuild).catch(() => undefined)
+    void officialBuildInfo().then((build) => {
+      setOfficialBuild(build)
+      void fetchClientUpdatePolicy(communityOrigin, build.version, build.platform).then((policy) => {
+        if (!policy?.shouldShow) return
+        const dismissed = localStorage.getItem(`nstrans.update-dismissed.${policy.targetVersion}`) === '1'
+        if (policy.forceUpdate || !dismissed) setClientUpdate(policy)
+      }).catch(() => undefined)
+    }).catch(() => undefined)
   }, [])
 
   const refreshDevices = useCallback(async () => {
@@ -2282,6 +2292,11 @@ function App() {
           <button onClick={() => setError('')}>×</button>
         </div>
       )}
+      {clientUpdate && <ClientUpdatePrompt policy={clientUpdate} onClose={() => {
+        if (clientUpdate.forceUpdate) return
+        localStorage.setItem(`nstrans.update-dismissed.${clientUpdate.targetVersion}`, '1')
+        setClientUpdate(null)
+      }} />}
     </main>
   )
 }

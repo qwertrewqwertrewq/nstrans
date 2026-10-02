@@ -72,6 +72,7 @@ async function route(request, env) {
   if (path === '/api/v1/auth/client/poll' && request.method === 'POST') return cors(await pollClientAuth(request, env))
   if (path === '/api/v1/auth/client/login' && request.method === 'POST') return cors(await nativeClientLogin(request, env))
   if (path === '/api/v1/auth/client/register' && request.method === 'POST') return cors(await nativeClientRegister(request, env))
+  if (path === '/api/v1/client-update' && request.method === 'GET') return cors(await clientUpdatePolicy(request, env))
   if (path === '/api/account/profile' && request.method === 'PATCH') return updateAccountProfile(request, env)
   if (path === '/api/account/password' && request.method === 'POST') return updateAccountPassword(request, env)
   if (path === '/api/stats' && request.method === 'GET') return publicStats(env)
@@ -83,6 +84,8 @@ async function route(request, env) {
   if (path === '/api/games' && request.method === 'POST') return submitGame(request, env)
   if (/^\/api\/admin\/games\/[^/]+$/u.test(path) && request.method === 'PATCH') return updateGame(request, env, decodeURIComponent(path.split('/')[4]))
   if (/^\/api\/admin\/games\/[^/]+$/u.test(path) && request.method === 'DELETE') return deleteGame(request, env, decodeURIComponent(path.split('/')[4]))
+  if (path === '/api/admin/update-policy' && request.method === 'GET') return getUpdatePolicy(request, env)
+  if (path === '/api/admin/update-policy' && request.method === 'PATCH') return saveUpdatePolicy(request, env)
   if (/^\/api\/games\/[^/]+\/terms$/u.test(path) && request.method === 'GET') return listTerms(request, env, decodeURIComponent(path.split('/')[3]))
   if (/^\/api\/games\/[^/]+\/terms$/u.test(path) && request.method === 'POST') return createTranslationFromWeb(request, env, decodeURIComponent(path.split('/')[3]))
   if (/^\/api\/translations\/\d+\/vote$/u.test(path) && request.method === 'POST') return vote(request, env, Number(path.split('/')[3]))
@@ -366,6 +369,24 @@ async function nativeClientRegister(request, env) {
   return json({ apiKey, username }, 201)
 }
 
+async function clientUpdatePolicy(request, env) {
+  const currentVersion = clean(new URL(request.url).searchParams.get('version'), 40)
+  const policy = await env.DB.prepare('SELECT target_version,popup_enabled,force_update,content,download_url,updated_at FROM client_update_policy WHERE id=1').first()
+  if (!policy) return json({ shouldShow: false })
+  const forceUpdate = Boolean(policy.force_update)
+  const popupEnabled = forceUpdate || Boolean(policy.popup_enabled)
+  const versionBehind = /^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(currentVersion) && compareVersions(currentVersion, policy.target_version) < 0
+  return json({
+    targetVersion: policy.target_version,
+    popupEnabled,
+    forceUpdate,
+    content: policy.content,
+    downloadUrl: policy.download_url,
+    updatedAt: policy.updated_at,
+    shouldShow: versionBehind && popupEnabled,
+  })
+}
+
 async function issueClientApiKey(env, userId, deviceId, deviceName) {
   const resolvedDeviceId = deviceId || randomToken(16), resolvedDeviceName = deviceName || 'NSTrans 客户端'
   await env.DB.prepare("UPDATE api_keys SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND device_id=? AND origin='official-client' AND revoked_at IS NULL").bind(userId, resolvedDeviceId).run()
@@ -523,6 +544,28 @@ async function deleteGame(request, env, id) {
   const result = await env.DB.prepare('DELETE FROM games WHERE id=?').bind(id).run()
   if (!result.meta.changes) return json({ error: '游戏不存在' }, 404)
   return json({ ok: true, id })
+}
+
+async function getUpdatePolicy(request, env) {
+  const auth = await requireUser(request, env, true); if (auth.response) return auth.response
+  const policy = await env.DB.prepare('SELECT target_version,popup_enabled,force_update,content,download_url,updated_at FROM client_update_policy WHERE id=1').first()
+  return json({ policy })
+}
+
+async function saveUpdatePolicy(request, env) {
+  const auth = await requireUser(request, env, true); if (auth.response) return auth.response
+  const body = await readJson(request), targetVersion = clean(body.targetVersion, 40), content = clean(body.content, 2000)
+  const forceUpdate = Boolean(body.forceUpdate), popupEnabled = forceUpdate || Boolean(body.popupEnabled)
+  const downloadUrl = clean(body.downloadUrl, 600) || `${env.SITE_ORIGIN}/download`
+  if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/u.test(targetVersion)) return json({ error: '目标版本必须使用 1.2.3 格式' }, 400)
+  if (!content) return json({ error: '弹窗内容不能为空' }, 400)
+  if (!isHttpsUrl(downloadUrl)) return json({ error: '下载地址必须使用 HTTPS' }, 400)
+  await env.DB.prepare(`INSERT INTO client_update_policy(id,target_version,popup_enabled,force_update,content,download_url,updated_by,updated_at)
+    VALUES(1,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET target_version=excluded.target_version,popup_enabled=excluded.popup_enabled,
+    force_update=excluded.force_update,content=excluded.content,download_url=excluded.download_url,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`)
+    .bind(targetVersion, popupEnabled ? 1 : 0, forceUpdate ? 1 : 0, content, downloadUrl, auth.user.id).run()
+  return json({ ok: true, policy: { target_version: targetVersion, popup_enabled: popupEnabled ? 1 : 0, force_update: forceUpdate ? 1 : 0, content, download_url: downloadUrl } })
 }
 
 async function listTerms(request, env, gameId) {
