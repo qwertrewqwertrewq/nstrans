@@ -79,8 +79,8 @@ npm run desktop:build:remote
 
 ```text
 src-tauri/target/release/bundle/macos/NSTrans.app
-src-tauri/target/release/bundle/dmg/NSTrans_0.1.5_aarch64.dmg
-src-tauri/target/release/bundle/dmg/NSTrans_0.1.5_aarch64_remote-only.dmg
+src-tauri/target/release/bundle/dmg/NSTrans_1.0.0_aarch64.dmg
+src-tauri/target/release/bundle/dmg/NSTrans_1.0.0_aarch64_remote-only.dmg
 ```
 
 macOS 客户端内置 Ollama 运行时并自行管理 TranslateGemma 4B（首次运行下载约 3.3GB）。NSTrans 会在本机回环地址启动隔离的 Ollama 服务，不依赖用户另行安装或启动 Ollama；MeikiOCR 与 ONNX 权重随应用分发并作为默认 OCR，Apple Vision 可由用户手动选择，并在 MeikiOCR 不可用时作为回退。所选 OCR 引擎会保存到本机。最终用户无需安装 Python 或启动外部模型服务。
@@ -143,7 +143,7 @@ npm run windows:build
 生成的 NSIS 安装程序位于：
 
 ```text
-src-tauri\target\release\bundle\nsis\NSTrans_0.1.5_x64-setup.exe
+src-tauri\target\release\bundle\nsis\NSTrans_1.0.0_x64-setup.exe
 ```
 
 ## TranslateGemma 4B 默认模型、来源与兼容限制
@@ -204,15 +204,15 @@ npm run build
 推送 `v*` 标签会触发 `.github/workflows/release.yml`，为四个平台同时生成 `WithLlama` 与 `RemoteOnly` 两套带校验和的安装包，然后使用仓库自动提供的 `GITHUB_TOKEN` 直接上传到对应 GitHub Release：
 
 ```bash
-git tag v0.1.5
-git push myrepo v0.1.5
+git tag v1.0.0
+git push myrepo v1.0.0
 ```
 
-也可以在 GitHub 的 Actions 页面手动运行 “Cross-platform release”，填写一个已经存在并包含该工作流的标签。工作流默认创建或沿用预发布版本，不需要保存 Apple 证书、Android keystore 或个人访问令牌。当前 iPadOS 产物由用户自行签名，Android 产物是调试签名；如需正式发行签名，需要另外通过 GitHub Environments 配置证书和密钥。
+也可以在 GitHub 的 Actions 页面手动运行 “Cross-platform release”，填写已经存在的版本标签。构建固定使用标签代码，先创建草稿，四个平台和 Android TV 全部构建成功后才公开为最新正式 Release。普通 main 分支构建不会自动覆盖现有 Release。当前 iPadOS 产物由用户自行签名，Android 产物是调试签名；正式 Release 标记不等同于应用商店签名。官方客户端认证仍需仓库配置 CLIENT_BUILD_SIGNING_KEY。
 
-## Alpha 构建下载
+## 正式版本下载
 
-[GitHub Releases](https://github.com/qwertrewqwertrewq/nstrans/releases) 提供 Windows x64 安装程序、macOS Apple Silicon DMG、需要自签的 iPadOS IPA，以及未经性能验证的 Android arm64 APK。它们仅供测试，不代表正式发布质量；模型通常需要首次启动后另行下载或由用户选择本地文件。
+[GitHub Releases](https://github.com/qwertrewqwertrewq/nstrans/releases/latest) 提供 Windows x64 安装程序、macOS Apple Silicon DMG、需要自签的 iPadOS IPA，以及未经充分性能验证的 Android arm64 APK。模型需要首次启动后另行下载或由用户选择本地文件；各平台硬件与签名限制仍适用。
 
 发行包不包含游戏画面、测试录像、剧情文本或 TranslateGemma 模型权重。仓库中的本地摄像头测试脚本只负责产生或读取开发者自行准备的测试输入，测试录像不会提交到版本库或上传到 Release。
 

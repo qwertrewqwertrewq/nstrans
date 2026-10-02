@@ -1,9 +1,6 @@
 name: Promote platform build artifacts
 
 on:
-  workflow_run:
-    workflows: ["Cross-platform builds"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       run_id:

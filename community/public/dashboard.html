@@ -92,7 +92,7 @@
           <form id="updatePolicyForm" class="panel update-policy-form">
             <div class="panel-title"><div><h2>版本规则</h2><p>仅版本号低于目标版本的客户端会收到提示。</p></div><span>管理员</span></div>
             <div class="update-policy-body">
-              <label>目标版本<input name="targetVersion" required maxlength="40" placeholder="0.1.5" pattern="\d+\.\d+\.\d+.*"></label>
+              <label>目标版本<input name="targetVersion" required maxlength="40" placeholder="1.0.0" pattern="\d+\.\d+\.\d+.*"></label>
               <label>下载页面<input name="downloadUrl" type="url" required maxlength="600" value="https://nstrans.221129.xyz/download"></label>
               <label class="policy-toggle"><input name="popupEnabled" type="checkbox"><span><strong>显示更新弹窗</strong><small>关闭后客户端不会主动提示此版本。</small></span></label>
               <label class="policy-toggle"><input name="forceUpdate" type="checkbox"><span><strong>强制更新</strong><small>开启后自动锁定“显示更新弹窗”，客户端无法关闭弹窗或继续使用。</small></span></label>

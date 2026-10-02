@@ -33,11 +33,17 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@v6
         with:
-          # A manual run updates an existing release from the selected branch's
-          # current commit. Tag-triggered releases remain pinned to the tag.
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG }}
 
-      - name: Create prerelease when missing
+      - name: Validate frontend and release version
+        run: |
+          npm ci --ignore-scripts
+          test "$(node -p 'require("./package.json").version')" = "${RELEASE_TAG#v}"
+          npm test
+          npm run lint
+          npm run build
+
+      - name: Create draft release when missing
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -47,23 +53,32 @@ jobs:
             if [[ -f "$notes_file" ]]; then
               gh release create "$RELEASE_TAG" \
                 --repo "$GITHUB_REPOSITORY" \
-                --title "NSTrans $RELEASE_TAG Alpha" \
-                --prerelease \
+                --title "NSTrans $RELEASE_TAG" \
+                --draft \
                 --notes-file "$notes_file"
             else
               gh release create "$RELEASE_TAG" \
                 --repo "$GITHUB_REPOSITORY" \
-                --title "NSTrans $RELEASE_TAG Alpha" \
-                --prerelease \
+                --title "NSTrans $RELEASE_TAG" \
+                --draft \
                 --generate-notes
             fi
           elif [[ -f "$notes_file" ]]; then
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "NSTrans $RELEASE_TAG Alpha" \
-              --prerelease \
+              --title "NSTrans $RELEASE_TAG" \
               --notes-file "$notes_file"
           fi
+
+  publish:
+    name: Publish complete stable release
+    needs: [macos, ipados, android, android-tv, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish as latest stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
 
   macos:
     name: macOS · WithLlama + RemoteOnly
@@ -74,7 +89,7 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -128,7 +143,7 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -176,7 +191,7 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -247,7 +262,7 @@ jobs:
       - name: Check out release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -283,7 +298,7 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

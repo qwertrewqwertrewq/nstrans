@@ -21,4 +21,13 @@ describe('ClientUpdatePrompt', () => {
     expect(screen.queryByRole('button', { name: '关闭更新提示' })).not.toBeInTheDocument()
     expect(screen.getByText(/完成更新后才能继续使用/)).toBeInTheDocument()
   })
+  it('blocks Escape for forced updates but dismisses ordinary reminders', () => {
+    const close = vi.fn()
+    const view = render(<ClientUpdatePrompt policy={{ ...policy, forceUpdate: true }} onClose={close} />)
+    fireEvent(screen.getByRole('dialog'), new Event('cancel', { bubbles: true, cancelable: true }))
+    expect(close).not.toHaveBeenCalled()
+    view.rerender(<ClientUpdatePrompt policy={policy} onClose={close} />)
+    fireEvent(screen.getByRole('dialog'), new Event('cancel', { bubbles: true, cancelable: true }))
+    expect(close).toHaveBeenCalledOnce()
+  })
 })

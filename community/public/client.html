@@ -3,11 +3,11 @@
 <body data-page="guide">
   <nav class="site-nav"><a class="brand" href="/"><img src="/project-logo.svg" alt=""><span class="brand-word">NSTrans</span></a><div class="site-links"><a href="/how-it-works">工作方式</a><a class="active" href="/client">客户端接入</a><a href="/download">下载</a><a href="https://github.com/qwertrewqwertrewq/nstrans" target="_blank" rel="noreferrer">GitHub ↗</a><a class="button compact" href="/dashboard">控制面板 <b>↗</b></a></div></nav>
   <main class="guide-main client-guide">
-    <header class="guide-hero"><span class="kicker">CLIENT API / 02</span><h1>下载无需登录，<br>贡献只需一个 Key。</h1><p>官方 OCR 客户端已经接入词库同步。普通用户无需配置；希望共享本地翻译时，在控制面板生成 Key 并填入客户端即可。</p></header>
+    <header class="guide-hero"><span class="kicker">CLIENT API / 02</span><h1>下载无需登录，<br>登录即可参与共建。</h1><p>官方客户端自动同步所选游戏词库。使用词库无需登录；参与共享时，在客户端注册、登录或通过 GitHub 授权，凭据会自动保存，无需手动复制 Key。</p></header>
     <section class="client-layout">
       <div class="steps-list">
         <article><b>1</b><div><h2>选择游戏</h2><p>客户端会自动下载通用词库以及所选游戏的最新词库包。</p></div></article>
-        <article><b>2</b><div><h2>启用共享</h2><p>在客户端设置中开启“共享本地词典”，粘贴控制面板生成的 API Key。</p></div></article>
+        <article><b>2</b><div><h2>登录并选择共享</h2><p>在设置向导或密钥管理中登录，再主动开启词库共享。登录本身不会自动开启上传，也可用于访问“wiki镜像”。</p></div></article>
         <article><b>3</b><div><h2>后台提交</h2><p>搜索确认的专名与模型生成的菜单短标签进入上传队列；对白和描述文本始终留在本地。</p></div></article>
       </div>
       <aside class="api-card"><span class="kicker">PUBLIC ENDPOINT</span><h2>词库下载</h2><pre><code>GET /api/v1/dictionaries/{gameId}</code></pre><p>无需身份验证，返回每个词条当前评分最高的译文。</p><span class="kicker">CONTRIBUTION ENDPOINT</span><h2>社区上传</h2><pre><code>Authorization: Bearer nst_live_••••

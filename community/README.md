@@ -121,3 +121,15 @@ Game creation requires only `chineseName`; `japaneseName` and an HTTPS
 not enter a moderation queue. Administrators may edit or delete games from the
 dashboard; deleting a game also deletes its dictionary through D1 foreign-key
 cascades.
+### Wiki mirror
+
+`POST /api/v1/wiki-mirror` requires an active community API key in the
+`Authorization: Bearer …` header. The client reads its existing login credential;
+dictionary sharing is not required. Available as `wiki镜像` in primary, fallback
+and manual terminology searches. Original Wiki evidence URLs are retained.
+
+The JSON body contains `site` (`ja`, `zh`, or `wikidata`) and `params` (the
+existing Wikimedia query parameters). Only title lookup, search, language links
+and Wikidata entity search are supported. The Worker builds a fixed upstream URL,
+limits result counts, rejects redirects and uses a 12-second upstream timeout.
+Community credentials are validated before every request and never sent upstream.

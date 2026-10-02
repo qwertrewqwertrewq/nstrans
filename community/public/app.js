@@ -5,7 +5,7 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/gu, (char) =>
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { 'content-type': 'application/json', ...(options.headers || {}) } })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.error || `请求失败 (${response.status})`)
+  if (!response.ok) throw Object.assign(new Error(body.error || `请求失败 (${response.status})`), { status: response.status })
   return body
 }
 
@@ -27,6 +27,7 @@ let dictionaryExclusions = []
 let dictionaryExclusionCount = 0
 let dictionaryName = ''
 let dictionarySearchTimer = 0
+let dictionaryRequest = 0
 const japaneseCollator = new Intl.Collator('ja', { usage: 'sort', sensitivity: 'base', numeric: true })
 
 if (document.body.dataset.page === 'home') loadHomeStats()
@@ -38,33 +39,41 @@ async function initDashboard() {
   $$('[data-view]').forEach((view) => { view.hidden = view.dataset.view !== route })
   $$('[data-route]').forEach((link) => link.classList.toggle('active', link.dataset.route === route))
   $('#routeCrumb').textContent = routeNames[route]
-  $('#mobileMenu').addEventListener('click', () => document.body.classList.toggle('menu-open'))
+  const setMenuOpen = (open) => { document.body.classList.toggle('menu-open', open); $('#mobileMenu').setAttribute('aria-expanded', String(open)) }
+  setMenuOpen(false)
+  $('#mobileMenu').addEventListener('click', () => setMenuOpen(!document.body.classList.contains('menu-open')))
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') setMenuOpen(false) })
   $$('[data-open-dialog]').forEach((button) => button.addEventListener('click', () => document.getElementById(button.dataset.openDialog).showModal()))
   $$('[data-close-dialog]').forEach((button) => button.addEventListener('click', () => document.getElementById(button.dataset.closeDialog).close()))
 
   try {
-    const [{ user }, stats, gamesResult] = await Promise.all([api('/api/me'), api('/api/stats'), api('/api/games')])
+    const { user } = await api('/api/me')
     dashboardUser = user
-    dashboardGames = gamesResult.games
     $('#avatar').src = user.avatar_url || '/project-logo.svg'
     $('#login').textContent = `@${user.login}`
     $('#roleBadge').textContent = user.role === 'admin' ? '管理员' : '贡献者'
     $('#welcomeName').textContent = user.login
     $$('[data-admin-only]').forEach((element) => { element.hidden = user.role !== 'admin' })
     if (route === 'updates' && user.role !== 'admin') { location.href = '/dashboard'; return }
-    renderMetrics(stats)
+    const [statsResult, gamesResult] = await Promise.allSettled([api('/api/stats'), api('/api/games')])
+    if (statsResult.status === 'fulfilled') renderMetrics(statsResult.value)
+    if (gamesResult.status === 'fulfilled') dashboardGames = gamesResult.value.games
+    if (statsResult.status === 'rejected' || gamesResult.status === 'rejected') flash('部分数据暂时无法加载，请稍后刷新重试。', true)
     setupGameForm()
     if (route === 'keys') { $('#createKey').addEventListener('click', createKey); await loadKeys() }
     if (route === 'games') renderGames(dashboardGames)
     if (route === 'dictionary') setupDictionary(dashboardGames)
     if (route === 'account') setupAccount(user)
     if (route === 'updates') await setupUpdatePolicy()
-  } catch { location.href = '/auth/github' }
+  } catch (error) {
+    if (error.status === 401) location.href = '/auth/github'
+    else flash(error.message || '页面加载失败，请刷新重试', true)
+  }
 }
 
 async function setupUpdatePolicy() {
   const form = $('#updatePolicyForm'), { policy } = await api('/api/admin/update-policy')
-  form.elements.targetVersion.value = policy?.target_version || '0.1.5'
+  form.elements.targetVersion.value = policy?.target_version || '1.0.0'
   form.elements.downloadUrl.value = policy?.download_url || `${location.origin}/download`
   form.elements.popupEnabled.checked = Boolean(policy?.popup_enabled)
   form.elements.forceUpdate.checked = Boolean(policy?.force_update)
@@ -110,9 +119,9 @@ async function loadKeys() {
   $('#keyList').innerHTML = keys.length ? keys.map((key) => `<div class="list-row"><div><strong>${key.origin === 'official-client' ? `${escapeHtml(key.device_name || 'NSTrans 官方客户端')} · ` : ''}${escapeHtml(key.key_prefix)}••••</strong><small>${key.origin === 'official-client' ? '由客户端登录自动配置 · ' : ''}创建于 ${date(key.created_at)}${key.last_used_at ? ` · 最近使用 ${date(key.last_used_at)}` : ' · 尚未使用'}</small></div><button data-revoke="${key.id}" class="danger-link">撤销</button></div>`).join('') : '<div class="empty-state">尚未生成客户端 Key</div>'
   $$('[data-revoke]').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('撤销后，使用此 Key 的客户端将立即无法上传。确定吗？')) return
-    await api(`/api/keys/${button.dataset.revoke}`, { method: 'DELETE' })
-    flash('Key 已撤销')
-    await loadKeys()
+    button.disabled = true
+    try { await api(`/api/keys/${button.dataset.revoke}`, { method: 'DELETE' }); flash('Key 已撤销'); await loadKeys() }
+    catch (error) { flash(error.message, true); button.disabled = false }
   }))
 }
 
@@ -206,17 +215,19 @@ async function deleteGame(id) {
 }
 
 async function loadTerms(gameId, name) {
+  const requestId = ++dictionaryRequest
   const panel = $('#termPanel')
   panel.innerHTML = '<div class="empty-state">正在加载…</div>'
   try {
     const query = $('#dictionarySearch').value.trim()
     const { terms, searchExclusions = [], searchExclusionCount = 0 } = await api(`/api/games/${encodeURIComponent(gameId)}/terms${query ? `?q=${encodeURIComponent(query)}` : ''}`)
+    if (requestId !== dictionaryRequest) return
     dictionaryTerms = terms
     dictionaryExclusions = searchExclusions
     dictionaryExclusionCount = searchExclusionCount
     dictionaryName = name
     renderTerms()
-  } catch (error) { panel.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>` }
+  } catch (error) { if (requestId === dictionaryRequest) panel.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>` }
 }
 
 function renderTerms() {

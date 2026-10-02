@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, ExternalLink, LogIn, UserPlus } from 'lucide-react'
 import { authenticateCommunityAccount, authenticateCommunityWithGithub, type CommunityAuthMode, type OfficialBuildInfo } from '../services/communityAccount'
 
@@ -17,6 +17,8 @@ export function CommunityAccountAccess({ origin, build, connected, onApiKey, onD
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const pending = useRef<AbortController | null>(null)
+  useEffect(() => () => pending.current?.abort(), [])
 
   const complete = (apiKey: string, success: string) => {
     onApiKey(apiKey)
@@ -24,19 +26,27 @@ export function CommunityAccountAccess({ origin, build, connected, onApiKey, onD
     setMessage(success)
   }
   const submitPassword = async () => {
+    if (pending.current) return
+    const controller = new AbortController(); pending.current = controller
     setBusy(true); setMessage(mode === 'login' ? '正在登录…' : '正在创建账号…')
-    try { complete(await authenticateCommunityAccount(origin, build, mode, { username, password }), mode === 'login' ? '登录成功，客户端密钥已自动保存' : '注册成功，客户端密钥已自动保存') }
-    catch (reason) { setMessage(reason instanceof Error ? reason.message : '社区账号操作失败') }
-    finally { setBusy(false) }
+    try { const key = await authenticateCommunityAccount(origin, build, mode, { username, password }, controller.signal); if (!controller.signal.aborted) complete(key, '登录成功，客户端密钥已自动保存') }
+    catch (reason) { if (!controller.signal.aborted) setMessage(reason instanceof Error ? reason.message : '社区账号操作失败') }
+    finally { if (pending.current === controller) { pending.current = null; setBusy(false) } }
   }
   const submitGithub = async () => {
+    if (pending.current) return
+    const controller = new AbortController(); pending.current = controller
     setBusy(true); setMessage('正在打开 GitHub 授权…')
-    try { complete(await authenticateCommunityWithGithub(origin, build, setMessage), 'GitHub 授权成功，客户端密钥已自动保存') }
-    catch (reason) { setMessage(reason instanceof Error ? reason.message : 'GitHub 授权失败') }
-    finally { setBusy(false) }
+    try { const key = await authenticateCommunityWithGithub(origin, build, (text) => { if (!controller.signal.aborted) setMessage(text) }, controller.signal); if (!controller.signal.aborted) complete(key, 'GitHub 授权成功，客户端密钥已自动保存') }
+    catch (reason) { if (!controller.signal.aborted) setMessage(reason instanceof Error ? reason.message : 'GitHub 授权失败') }
+    finally { if (pending.current === controller) { pending.current = null; setBusy(false) } }
   }
 
-  return <div className={`community-account-access ${compact ? 'compact' : ''}`}>
+  return <div className={`community-account-access ${compact ? 'compact' : ''}`} onKeyDown={(event) => {
+    if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !connected && build.available && username.trim().length >= 3 && password.length >= (mode === 'register' ? 10 : 1)) {
+      event.preventDefault(); void submitPassword()
+    }
+  }}>
     <div className="community-account-state">
       <span className={connected ? 'connected' : ''}>{connected ? <Check size={14} /> : <LogIn size={14} />}</span>
       <div><strong>{connected ? '此设备已登录社区' : '登录 NSTrans 社区'}</strong><small>{connected ? '社区客户端密钥已安全保存在本机，不会在界面中显示。' : '登录后自动配置词库上传和游戏创建权限。'}</small></div>
@@ -48,6 +58,7 @@ export function CommunityAccountAccess({ origin, build, connected, onApiKey, onD
       <div className="community-auth-divider"><span>或</span></div>
       <button className="secondary community-github-auth" disabled={busy} onClick={() => void submitGithub()}>使用 GitHub 授权<ExternalLink size={13} /></button>
     </>}
-    {message && <small className="community-auth-message">{message}</small>}
+    {busy && <button className="text-button" onClick={() => { pending.current?.abort(); pending.current = null; setBusy(false); setPassword(''); setMessage('已取消登录') }}>取消登录</button>}
+    {message && <small role="status" className="community-auth-message">{message}</small>}
   </div>
 }

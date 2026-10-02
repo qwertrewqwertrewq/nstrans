@@ -320,7 +320,7 @@ function App() {
       setOfficialBuild(build)
       void fetchClientUpdatePolicy(communityOrigin, build.version, build.platform).then((policy) => {
         if (!policy?.shouldShow) return
-        const dismissed = localStorage.getItem(`nstrans.update-dismissed.${policy.targetVersion}`) === '1'
+        const dismissed = sessionStorage.getItem(`nstrans.update-dismissed.${policy.targetVersion}.${policy.updatedAt ?? ''}`) === '1'
         if (policy.forceUpdate || !dismissed) setClientUpdate(policy)
       }).catch(() => undefined)
     }).catch(() => undefined)
@@ -2294,7 +2294,7 @@ function App() {
       )}
       {clientUpdate && <ClientUpdatePrompt policy={clientUpdate} onClose={() => {
         if (clientUpdate.forceUpdate) return
-        localStorage.setItem(`nstrans.update-dismissed.${clientUpdate.targetVersion}`, '1')
+        sessionStorage.setItem(`nstrans.update-dismissed.${clientUpdate.targetVersion}.${clientUpdate.updatedAt ?? ''}`, '1')
         setClientUpdate(null)
       }} />}
     </main>

@@ -1,4 +1,4 @@
-export type EntitySearchEngineId = 'wiki' | 'brave' | 'qianfan' | 'qwen'
+export type EntitySearchEngineId = 'wiki' | 'wiki-mirror' | 'brave' | 'qianfan' | 'qwen'
 export type SearchKeywordMode = 'current-game' | 'custom'
 export type RemoteModelCapability = 'multimodal-search' | 'search-only' | 'offline'
 export type RemoteModelProfile = {
@@ -147,13 +147,14 @@ export function searchEngineKey(settings: EntitySearchSettings, engine: EntitySe
 
 export const entitySearchEngineLabels: Record<EntitySearchEngineId, string> = {
   wiki: '免费 Wiki',
+  'wiki-mirror': 'wiki镜像',
   brave: 'Brave Search',
   qianfan: '百度千帆',
   qwen: '千问远程模型',
 }
 
 function isEngine(value: unknown): value is EntitySearchEngineId {
-  return value === 'wiki' || value === 'brave' || value === 'qianfan' || value === 'qwen'
+  return value === 'wiki' || value === 'wiki-mirror' || value === 'brave' || value === 'qianfan' || value === 'qwen'
 }
 
 const validProfile = (value: unknown): value is RemoteModelProfile => Boolean(value && typeof value === 'object' && typeof Reflect.get(value, 'id') === 'string' && typeof Reflect.get(value, 'name') === 'string' && typeof Reflect.get(value, 'model') === 'string' && ['multimodal-search', 'search-only', 'offline'].includes(String(Reflect.get(value, 'capability'))))

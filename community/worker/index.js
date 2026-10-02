@@ -1,3 +1,5 @@
+import { proxyWikiMirror } from './wiki-mirror.js'
+
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' }
 const encoder = new TextEncoder()
 const githubRepository = 'qwertrewqwertrewq/nstrans'
@@ -73,6 +75,16 @@ async function route(request, env) {
   if (path === '/api/v1/auth/client/login' && request.method === 'POST') return cors(await nativeClientLogin(request, env))
   if (path === '/api/v1/auth/client/register' && request.method === 'POST') return cors(await nativeClientRegister(request, env))
   if (path === '/api/v1/client-update' && request.method === 'GET') return cors(await clientUpdatePolicy(request, env))
+  if (path === '/api/v1/wiki-mirror' && request.method === 'POST') {
+    const auth = await apiKeyUser(request, env)
+    if (auth.response) return cors(auth.response)
+    if (Number(request.headers.get('content-length') || 0) > 8192) return cors(json({ error: '请求内容过大' }, 413))
+    const text = await request.text()
+    if (text.length > 8192) return cors(json({ error: '请求内容过大' }, 413))
+    let body
+    try { body = JSON.parse(text) } catch { return cors(json({ error: '请求必须为 JSON' }, 400)) }
+    return cors(await proxyWikiMirror(body))
+  }
   if (path === '/api/account/profile' && request.method === 'PATCH') return updateAccountProfile(request, env)
   if (path === '/api/account/password' && request.method === 'POST') return updateAccountPassword(request, env)
   if (path === '/api/stats' && request.method === 'GET') return publicStats(env)

@@ -44,30 +44,31 @@ function buildPlatformLabel() {
   return platform.slice(0, 80)
 }
 
-async function clientAuthRequest(origin: string, path: string, body: object) {
-  const response = await fetch(`${origin.replace(/\/$/u, '')}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+async function clientAuthRequest(origin: string, path: string, body: object, signal?: AbortSignal) {
+  const response = await fetch(`${origin.replace(/\/$/u, '')}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal })
   const result = await response.json().catch(() => ({})) as { apiKey?: string; error?: string; [key: string]: unknown }
   if (!response.ok) throw new Error(result.error || `社区账号请求失败 (${response.status})`)
   return result
 }
 
-export async function authenticateCommunityAccount(origin: string, build: OfficialBuildInfo, mode: CommunityAuthMode, input: CommunityAuthInput) {
+export async function authenticateCommunityAccount(origin: string, build: OfficialBuildInfo, mode: CommunityAuthMode, input: CommunityAuthInput, signal?: AbortSignal) {
   if (!build.available || !build.attestation) throw new Error('当前安装包不含官方构建签名')
-  const result = await clientAuthRequest(origin, `/api/v1/auth/client/${mode}`, { attestation: build.attestation, ...clientDevice(), ...input })
+  const result = await clientAuthRequest(origin, `/api/v1/auth/client/${mode}`, { attestation: build.attestation, ...clientDevice(), ...input }, signal)
   if (!result.apiKey) throw new Error('服务端没有返回客户端凭证')
   return result.apiKey
 }
 
-export async function authenticateCommunityWithGithub(origin: string, build: OfficialBuildInfo, onStatus?: (message: string) => void) {
+export async function authenticateCommunityWithGithub(origin: string, build: OfficialBuildInfo, onStatus?: (message: string) => void, signal?: AbortSignal) {
   if (!build.available || !build.attestation) throw new Error('当前安装包不含官方构建签名')
-  const start = await clientAuthRequest(origin, '/api/v1/auth/client/start', { attestation: build.attestation, ...clientDevice() }) as { browserUrl?: string; pollToken?: string; expiresIn?: number }
+  const start = await clientAuthRequest(origin, '/api/v1/auth/client/start', { attestation: build.attestation, ...clientDevice() }, signal) as { browserUrl?: string; pollToken?: string; expiresIn?: number }
   if (!start.browserUrl || !start.pollToken) throw new Error('无法创建 GitHub 授权会话')
   await openUrl(start.browserUrl)
   onStatus?.('请在浏览器完成 GitHub 授权，完成后会自动返回应用')
   const deadline = Date.now() + Math.min(Number(start.expiresIn || 600), 600) * 1000
   while (Date.now() < deadline) {
     await new Promise((resolve) => window.setTimeout(resolve, 1800))
-    const response = await fetch(`${origin.replace(/\/$/u, '')}/api/v1/auth/client/poll`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pollToken: start.pollToken }) })
+    if (signal?.aborted) throw new DOMException('授权已取消', 'AbortError')
+    const response = await fetch(`${origin.replace(/\/$/u, '')}/api/v1/auth/client/poll`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pollToken: start.pollToken }), signal })
     const result = await response.json().catch(() => ({})) as { status?: string; apiKey?: string; error?: string }
     if (response.status === 202 || result.status === 'pending') continue
     if (!response.ok) throw new Error(result.error || 'GitHub 授权失败')

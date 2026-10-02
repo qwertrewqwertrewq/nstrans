@@ -5,6 +5,7 @@ import type { TerminologyResearch } from './translationRuntime'
 import { DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, defaultEntitySearchSettings, remoteModelCredentials, renderSearchTemplate, resolveSearchKeywords, searchEngineKey, type EntitySearchEngineId, type EntitySearchSettings } from './entitySearchSettings'
 import { writeDiagnosticLog } from './diagnosticLog'
 import { qwenSearchTerm } from './qwenFlash'
+import { wikiMirrorFetch } from './wikiMirror'
 
 export type EntityLookupResult = Omit<StoredEntity, 'gameId' | 'updatedAt'>
 export type EntityLookupContext = {
@@ -17,7 +18,7 @@ export interface EntityLookupProvider {
 }
 export type EntitySearchHit = { title: string; url: string; snippet: string }
 export interface EntityWebSearchTransport {
-  search(engine: Exclude<EntitySearchEngineId, 'wiki'>, query: string, apiKey: string): Promise<EntitySearchHit[]>
+  search(engine: Exclude<EntitySearchEngineId, 'wiki' | 'wiki-mirror'>, query: string, apiKey: string): Promise<EntitySearchHit[]>
 }
 
 type SearchPage = {
@@ -61,7 +62,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     }).toString()
     const response = await this.request(url, {
       headers: {
-        'Api-User-Agent': 'NSTrans/0.1.5 (game translation terminology lookup)',
+        'Api-User-Agent': 'NSTrans/1.0.0 (game translation terminology lookup)',
       },
     })
     if (!response.ok) throw new Error(`Wikipedia entity lookup failed: ${response.status}`)
@@ -97,7 +98,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     }).toString()
     const response = await this.request(url, {
       headers: {
-        'Api-User-Agent': 'NSTrans/0.1.5 (game translation terminology lookup)',
+        'Api-User-Agent': 'NSTrans/1.0.0 (game translation terminology lookup)',
       },
     })
     if (!response.ok) return title
@@ -119,7 +120,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
     }).toString()
     const response = await this.request(url, {
       headers: {
-        'Api-User-Agent': 'NSTrans/0.1.5 (game translation terminology lookup)',
+        'Api-User-Agent': 'NSTrans/1.0.0 (game translation terminology lookup)',
       },
     })
     if (!response.ok) return { source, status: wikipediaCandidate ? 'pending' : 'missing' }
@@ -159,7 +160,7 @@ export class WikimediaEntityLookup implements EntityLookupProvider {
         try {
           const response = await this.request(url, {
             headers: {
-              'Api-User-Agent': 'NSTrans/0.1.5 (game translation terminology research)',
+              'Api-User-Agent': 'NSTrans/1.0.0 (game translation terminology research)',
             },
           })
           if (!response.ok) return { query, evidence: [], sourceUrls: [] }
@@ -196,7 +197,7 @@ export class HttpEntityWebSearchTransport implements EntityWebSearchTransport {
     this.endpoint = endpoint
     this.request = request.bind(globalThis)
   }
-  async search(engine: Exclude<EntitySearchEngineId, 'wiki'>, query: string, apiKey: string) {
+  async search(engine: Exclude<EntitySearchEngineId, 'wiki' | 'wiki-mirror'>, query: string, apiKey: string) {
     if (isTauri())
       return await invoke<EntitySearchHit[]>('entity_web_search', {
         engine,
@@ -220,6 +221,7 @@ export class HttpEntityWebSearchTransport implements EntityWebSearchTransport {
 /** Selects generic search engines by user preference; no game-specific source is embedded here. */
 export class ConfigurableEntityLookup implements EntityLookupProvider {
   private readonly wiki: EntityLookupProvider
+  private readonly mirror = new WikimediaEntityLookup(wikiMirrorFetch)
   private readonly web: EntityWebSearchTransport
   constructor(wiki: EntityLookupProvider = new WikimediaEntityLookup(), web: EntityWebSearchTransport = new HttpEntityWebSearchTransport()) {
     this.wiki = wiki
@@ -238,7 +240,7 @@ export class ConfigurableEntityLookup implements EntityLookupProvider {
       writeDiagnosticLog('搜索', '发起查询', `${source} · ${searchEngineLabel(engine)} · ${query}`, 'info')
       let result: EntityLookupResult
       try {
-        result = engine === 'wiki' ? await this.wiki.lookup(source, resolvedContext) : await this.lookupWeb(engine, source, gameNames, searchEngineKey(settings, engine), settings)
+        result = engine === 'wiki' ? await this.wiki.lookup(source, resolvedContext) : engine === 'wiki-mirror' ? await this.mirror.lookup(source, resolvedContext) : await this.lookupWeb(engine, source, gameNames, searchEngineKey(settings, engine), settings)
         console.info('[entity-search]', {
           engine,
           source,
@@ -266,7 +268,7 @@ export class ConfigurableEntityLookup implements EntityLookupProvider {
     return last
   }
 
-  private async lookupWeb(engine: Exclude<EntitySearchEngineId, 'wiki'>, source: string, gameNames: readonly string[], apiKey: string, settings: EntitySearchSettings): Promise<EntityLookupResult> {
+  private async lookupWeb(engine: Exclude<EntitySearchEngineId, 'wiki' | 'wiki-mirror'>, source: string, gameNames: readonly string[], apiKey: string, settings: EntitySearchSettings): Promise<EntityLookupResult> {
     if (!apiKey) return { source, status: 'missing' }
     const query = buildEntitySearchQuery(source, gameNames, settings.traditionalSearchTemplate)
     if (engine === 'qwen') {
@@ -307,6 +309,7 @@ function searchEngineLabel(engine: EntitySearchEngineId) {
   return (
     {
       wiki: 'Wikipedia / Wikidata',
+      'wiki-mirror': 'wiki镜像',
       brave: 'Brave Search',
       qianfan: '百度千帆',
       qwen: '千问远程模型',
