@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>控制面板 · NSTrans</title><link rel="icon" href="/project-logo.svg"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/dashboard-games.css"><link rel="stylesheet" href="/account.css"></head>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>控制面板 · NSTrans</title><link rel="icon" href="/project-logo.svg"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/dashboard-games.css"><link rel="stylesheet" href="/account.css"><link rel="stylesheet" href="/support.css"></head>
 <body data-page="dashboard">
   <div class="console-shell">
     <aside class="console-sidebar">
@@ -109,4 +109,4 @@
   <dialog id="entryDialog"><form id="entryForm"><div class="dialog-head"><div><span class="kicker">EDIT ENTRY</span><h2>修改词条</h2></div><button type="button" class="icon-button" data-close-dialog="entryDialog" aria-label="关闭">×</button></div><p>保存会直接覆盖当前原文与译文，并为这条译文增加 3 分。</p><input name="translationId" type="hidden"><label>日文原文<input name="source" maxlength="240" required lang="ja"></label><label>中文译文<input name="target" maxlength="240" required></label><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog="entryDialog">取消</button><button class="button" type="submit">保存并 +3</button></div></form></dialog>
   <dialog id="newEntryDialog"><form id="newEntryForm"><div class="dialog-head"><div><span class="kicker">NEW ENTRY</span><h2>新增词条</h2></div><button type="button" class="icon-button" data-close-dialog="newEntryDialog" aria-label="关闭">×</button></div><p>词条将加入当前选择的游戏，初始可信度评分为 3。</p><label>类型<select name="kind"><option value="term">名词 / 专有名词</option><option value="phrase">单词 / 短句</option></select></label><label>日文原文<input name="source" maxlength="240" required lang="ja"></label><label>中文译文<input name="target" maxlength="240" required></label><div class="dialog-actions"><button type="button" class="button secondary" data-close-dialog="newEntryDialog">取消</button><button class="button" type="submit">新增并 +3</button></div></form></dialog>
   <script src="/app.js" defer></script>
-</body></html>
+<script src="/support.js" defer></script></body></html>

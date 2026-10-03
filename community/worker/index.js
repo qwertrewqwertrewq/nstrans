@@ -117,7 +117,7 @@ async function route(request, env) {
   if (path.startsWith('/download/model/')) return downloadModel(request, path.slice('/download/model/'.length))
   if (path === '/download/model-notice') return modelNotice()
   if (path === '/client-login' || path === '/client-login.html' || path === '/client-login.js') return new Response('Not Found', { status: 404 })
-  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/client-auth-complete') return servePage(request, env)
+  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/donate' || path === '/client-auth-complete') return servePage(request, env)
   return secureAsset(await env.ASSETS.fetch(request))
 }
 

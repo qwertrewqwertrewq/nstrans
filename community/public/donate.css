@@ -1,0 +1,25 @@
+.donate-main{max-width:1440px;padding-top:48px;padding-bottom:48px}
+.donate-main .guide-hero{display:block;margin-bottom:32px}
+.donate-main .guide-hero h1{font-size:clamp(32px,4vw,52px);margin:14px 0}
+.donate-main .guide-hero h1 br{display:none}
+.donate-main .guide-hero p{font-size:15px;max-width:760px;margin:12px 0}
+.donate-main .guide-hero .button{margin-top:8px}
+.donate-main .guide-hero .donate-optional{margin-top:12px;font-size:12px}
+.donate-methods{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:20px;align-items:start}
+.donate-methods [hidden],.donate-tabs[hidden]{display:none!important}
+.donate-methods .payment-card{padding:0;overflow:hidden;background:white}
+.donate-methods .payment-image{height:auto;margin:0;border:0;border-radius:0}
+.donate-methods .payment-image img{width:100%;height:auto;max-height:none;display:block}
+.donate-methods .crypto-card{display:flex;flex-direction:column;gap:16px;margin:0;padding:24px;align-items:stretch}
+.crypto-card h2{font-size:22px;margin:0 0 16px}
+.crypto-card .address-row{flex-direction:column;align-items:stretch}
+.crypto-card .address-row input{font-size:11px}
+.crypto-card .network-tags{margin:12px 0 20px}
+.crypto-card figure img{width:200px}
+.crypto-card figcaption{line-height:1.7}
+#copy-donation-status:empty{display:none}
+.donate-tabs{display:flex;padding:5px;gap:5px;background:var(--soft);border:1px solid var(--line);border-radius:10px;margin-bottom:18px}
+.donate-tabs button{flex:1;border:0;border-radius:6px;padding:12px 8px;background:transparent;color:var(--muted);cursor:pointer;font-weight:700}
+.donate-tabs button[aria-selected="true"]{background:var(--surface);color:var(--deep);box-shadow:0 1px 5px #0001}
+@media(max-width:1099px){.donate-methods{display:block;max-width:430px;margin:0 auto}.donate-tabs{max-width:430px;margin:0 auto 18px}.donate-main .guide-hero{margin-bottom:24px}.donate-methods .crypto-card{padding:22px}}
+@media(max-width:720px){.donate-main{padding-top:28px}.donate-main .guide-hero h1{font-size:32px}.donate-main .guide-hero p{font-size:13px}.donate-main .guide-hero .donate-optional{font-size:11px}}
