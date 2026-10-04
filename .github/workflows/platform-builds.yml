@@ -19,6 +19,7 @@ env:
 
 jobs:
   macos:
+    if: "!contains(github.event.head_commit.message, '[desktop-hotfix]')"
     name: macOS · WithLlama + RemoteOnly
     runs-on: macos-26
     timeout-minutes: 150
@@ -67,6 +68,7 @@ jobs:
           if-no-files-found: error
 
   ipados:
+    if: "!contains(github.event.head_commit.message, '[desktop-hotfix]')"
     name: iPadOS · WithLlama + RemoteOnly
     runs-on: macos-15
     timeout-minutes: 150
@@ -111,6 +113,7 @@ jobs:
           if-no-files-found: error
 
   android:
+    if: "!contains(github.event.head_commit.message, '[desktop-hotfix]')"
     name: Android · WithLlama + RemoteOnly
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -179,6 +182,7 @@ jobs:
           if-no-files-found: error
 
   android-tv:
+    if: "!contains(github.event.head_commit.message, '[desktop-hotfix]')"
     name: Android TV · Subtitle client
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -203,6 +207,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: "!contains(github.event.head_commit.message, '[desktop-hotfix]')"
     name: Windows · WithLlama + RemoteOnly
     runs-on: windows-latest
     timeout-minutes: 210

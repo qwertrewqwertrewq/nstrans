@@ -691,7 +691,7 @@ function App() {
           return
         }
         if (!navigator.mediaDevices) throw new Error('当前环境不支持摄像头或采集卡访问')
-        const next = await openPreferredVideoStream(navigator.mediaDevices, requestedDeviceId)
+        const next = await openPreferredVideoStream(navigator.mediaDevices, requestedDeviceId, clientPlatform === 'macos' || clientPlatform === 'windows' ? 60 : 30)
         const track = next.getVideoTracks()[0]
         const activeDeviceId = track?.getSettings().deviceId
         if (activeDeviceId) setDeviceId(activeDeviceId)
@@ -709,7 +709,7 @@ function App() {
         setRunning(true)
         setDevicePermission('granted')
         await refreshDevices()
-        writeDiagnosticLog('OCR', 'OCR 启动', `${track?.label || '视频设备'} · ${sourceWidth} × ${sourceHeight} · ${ocr.scanMode} · ${ocr.language}`, 'success')
+        writeDiagnosticLog('OCR', 'OCR 启动', `${track?.label || '视频设备'} · ${sourceWidth} × ${sourceHeight} · ${track?.getSettings().frameRate ?? '未知'} FPS（采集协商值） · ${ocr.scanMode} · ${ocr.language}`, 'success')
         void startCaptureAudio(requestedDeviceId, track?.label || '视频设备')
       } catch (reason) {
         const message = errorMessage(reason, '无法打开输入源')
@@ -717,7 +717,7 @@ function App() {
         writeDiagnosticLog('系统', '输入源打开失败', message, 'error')
       }
     },
-    [deviceId, ocr.language, ocr.scanMode, refreshDevices, startCaptureAudio, stopInput, syncMediaFrameSize],
+    [clientPlatform, deviceId, ocr.language, ocr.scanMode, refreshDevices, startCaptureAudio, stopInput, syncMediaFrameSize],
   )
   useEffect(
     () => () => {

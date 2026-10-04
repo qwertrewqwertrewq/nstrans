@@ -2,6 +2,18 @@ import { describe, expect, it, vi } from 'vitest'
 import { findCaptureAudioDevice, openPreferredVideoStream } from './mediaCapture'
 
 describe('media capture constraints', () => {
+  it('prefers 60 fps on desktop without requiring unsupported frame rates', async () => {
+    const stream = { getVideoTracks: () => [{ getSettings: () => ({ frameRate: 30 }) }] } as unknown as MediaStream
+    const getUserMedia = vi.fn(async (_constraints: MediaStreamConstraints) => stream)
+    await expect(openPreferredVideoStream({ getUserMedia }, 'card', 60)).resolves.toBe(stream)
+    expect(getUserMedia.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ video: expect.objectContaining({ frameRate: { ideal: 60, max: 60 } }) }))
+  })
+
+  it('keeps mobile and unspecified callers at the existing 30 fps preference', async () => {
+    const getUserMedia = vi.fn(async (_constraints: MediaStreamConstraints) => ({} as MediaStream))
+    await openPreferredVideoStream({ getUserMedia }, 'camera')
+    expect(getUserMedia.mock.calls[0]?.[0].video).toEqual(expect.objectContaining({ frameRate: { ideal: 30, max: 60 } }))
+  })
   it('requests the selected capture card at exact 1080p first', async () => {
     const stream = {} as MediaStream
     const getUserMedia = vi.fn(async () => stream)

@@ -40,11 +40,11 @@ const deviceConstraint = (deviceId: string) => (deviceId ? { deviceId: { exact: 
  * satisfy `ideal: 1920x1080` with that mode, so first request Full HD exactly,
  * then progressively relax the constraints for cameras that cannot provide it.
  */
-export async function openPreferredVideoStream(mediaDevices: VideoMediaDevices, deviceId = '') {
+export async function openPreferredVideoStream(mediaDevices: VideoMediaDevices, deviceId = '', preferredFrameRate: 30 | 60 = 30) {
   const device = deviceConstraint(deviceId)
   const profiles: MediaTrackConstraints[] = [
-    { ...device, width: { exact: 1920 }, height: { exact: 1080 }, frameRate: { ideal: 30, max: 60 } },
-    { ...device, width: { min: 1280, ideal: 1920 }, height: { min: 720, ideal: 1080 }, aspectRatio: { ideal: 16 / 9 }, frameRate: { ideal: 30, max: 60 } },
+    { ...device, width: { exact: 1920 }, height: { exact: 1080 }, frameRate: { ideal: preferredFrameRate, max: 60 } },
+    { ...device, width: { min: 1280, ideal: 1920 }, height: { min: 720, ideal: 1080 }, aspectRatio: { ideal: 16 / 9 }, frameRate: { ideal: preferredFrameRate, max: 60 } },
     { ...device, width: { ideal: 1920 }, height: { ideal: 1080 }, aspectRatio: { ideal: 16 / 9 } },
   ]
   let lastError: unknown
