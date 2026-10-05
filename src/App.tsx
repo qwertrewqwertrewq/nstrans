@@ -32,6 +32,7 @@ import { SetupWizard } from './components/SetupWizard'
 import { officialBuildInfo, type OfficialBuildInfo } from './services/communityAccount'
 import { CommunityAccountAccess } from './components/CommunityAccountAccess'
 import { ClientUpdatePrompt } from './components/ClientUpdatePrompt'
+import { useMediaStreamCleanup } from './hooks/useMediaStreamCleanup'
 import { fetchClientUpdatePolicy, type ClientUpdatePolicy } from './services/clientUpdate'
 
 const emptyLatency: LatencySample = {
@@ -154,6 +155,8 @@ function App() {
   const busyRef = useRef(false)
   const autoCameraAuthorizationStartedRef = useRef(false)
   const audioAuthorizationGrantedRef = useRef(false)
+  const audioStreamRef = useRef<MediaStream | null>(null)
+  const audioRequestRef = useRef(0)
   const pendingFrameRef = useRef<FrameProcessOptions | null>(null)
   const processFrameRef = useRef<(options?: FrameProcessOptions) => Promise<void>>(async () => {})
   const nativeFullscreenOwnedRef = useRef(false)
@@ -588,13 +591,16 @@ function App() {
   }, [authorizeAndScan, clientPlatform, devicePermission])
 
   const stopCaptureAudio = useCallback(() => {
-    audioStream?.getTracks().forEach((track) => track.stop())
+    audioRequestRef.current++
+    audioStreamRef.current?.getTracks().forEach((track) => track.stop())
+    audioStreamRef.current = null
     if (audioRef.current) audioRef.current.srcObject = null
     setAudioStream(null)
-  }, [audioStream])
+  }, [])
 
   const startCaptureAudio = useCallback(async (requestedVideoId: string, videoLabel: string, enabled = captureAudioEnabled, preferredAudioId = audioDeviceId) => {
     stopCaptureAudio()
+    const request = audioRequestRef.current
     if (!enabled || !navigator.mediaDevices) {
       setCaptureAudioStatus(enabled ? '当前环境不支持音频采集' : '采集卡音频已关闭')
       return
@@ -609,6 +615,7 @@ function App() {
         audioAuthorizationGrantedRef.current = true
       }
       const enumerated = await navigator.mediaDevices.enumerateDevices()
+      if (request !== audioRequestRef.current) return
       const inputs = enumerated.filter((device) => device.kind === 'audioinput')
       const descriptors = inputs.map((device, index) => ({
         deviceId: device.deviceId,
@@ -633,6 +640,11 @@ function App() {
           autoGainControl: false,
         },
       })
+      if (request !== audioRequestRef.current) {
+        nextAudio.getTracks().forEach((track) => track.stop())
+        return
+      }
+      audioStreamRef.current = nextAudio
       setAudioStream(nextAudio)
       setAudioDeviceId(selected.deviceId)
       if (audioRef.current) {
@@ -640,9 +652,12 @@ function App() {
         audioRef.current.volume = 1
         await audioRef.current.play()
       }
+      if (request !== audioRequestRef.current) return
       setCaptureAudioStatus(`正在输出 · ${selected.label}`)
       writeDiagnosticLog('音频', '采集卡音频输出已启用', selected.label, 'success')
     } catch (reason) {
+      if (request !== audioRequestRef.current) return
+      stopCaptureAudio()
       const message = errorMessage(reason, '无法打开采集卡音频')
       setCaptureAudioStatus(message)
       writeDiagnosticLog('音频', '采集卡音频输出失败', message, 'warning')
@@ -719,13 +734,9 @@ function App() {
     },
     [clientPlatform, deviceId, ocr.language, ocr.scanMode, refreshDevices, startCaptureAudio, stopInput, syncMediaFrameSize],
   )
-  useEffect(
-    () => () => {
-      stream?.getTracks().forEach((track) => track.stop())
-      audioStream?.getTracks().forEach((track) => track.stop())
-    },
-    [audioStream, stream],
-  )
+  useMediaStreamCleanup(stream)
+  useMediaStreamCleanup(audioStream)
+  useEffect(() => () => { audioRequestRef.current++ }, [])
   useEffect(
     () => () => {
       if (usbInput.active) void closeUsbVideoDevice()
@@ -733,7 +744,7 @@ function App() {
     [usbInput.active],
   )
   useEffect(() => {
-    if (!usbInput.active || !running || playbackPaused) return
+    if (!usbInput.active || playbackPaused) return
     let active = true,
       timer = 0
     const next = async () => {
@@ -773,7 +784,7 @@ function App() {
       active = false
       window.clearTimeout(timer)
     }
-  }, [playbackPaused, running, usbInput.active])
+  }, [playbackPaused, usbInput.active])
   useEffect(
     () => () => {
       void disposeOcr()
@@ -844,6 +855,7 @@ function App() {
           translationRetryRef.current.clear()
           setRegions([])
         }
+        const frameEpoch = translationEpochRef.current
         const captureStart = performance.now(),
           size = fitCaptureSize(sourceWidth, sourceHeight)
         canvas.width = size.width
@@ -868,6 +880,7 @@ function App() {
           ocrCanvas = selectionCanvasRef.current
         }
         const detectedRegions = await recognizeJapanese(ocrCanvas, ocr.language, ocr.confidence, options.fullFrame || selection ? 'full' : ocr.scanMode, setProgress, ocr.engine)
+        if (frameEpoch !== translationEpochRef.current) return
         const nextRegions = crop ? offsetTextRegions(detectedRegions, crop.x, crop.y) : detectedRegions
         const ocrTime = performance.now() - ocrStart
         const observation = stabilizerRef.current.observe(nextRegions)
@@ -992,6 +1005,7 @@ function App() {
               }))
             })
             .catch((reason) => {
+              if (translationEpoch !== translationEpochRef.current) return
               const message = errorMessage(reason, '翻译请求失败')
               ready.forEach((region) =>
                 translationRetryRef.current.set(region.id, {
@@ -1078,6 +1092,18 @@ function App() {
 
   const retranslateFrame = async (options: FrameProcessOptions = {}) => {
     await processFrame({ ...options, force: true })
+  }
+  const pauseRecognition = () => {
+    translationEpochRef.current++
+    pendingFrameRef.current = null
+    latestVisibleRegionsRef.current = []
+    stabilizerRef.current.reset()
+    marqueeLocksRef.current.clear()
+    trackedTranslationsRef.current.clear()
+    translationRetryRef.current.clear()
+    setRunning(false)
+    setRegions([])
+    writeDiagnosticLog('OCR', 'OCR 已暂停', '已清除字幕，保留输入预览与音频', 'warning')
   }
   const toggleFullscreen = async () => {
     if (fullscreenPreview) {
@@ -1606,15 +1632,12 @@ function App() {
                 disabled={!devices.length}
                 onClick={
                   running
-                    ? () => {
-                        setRunning(false)
-                        writeDiagnosticLog('OCR', 'OCR 已暂停', undefined, 'warning')
-                      }
-                    : () => void startInput()
+                    ? pauseRecognition
+                    : inputActive ? () => setRunning(true) : () => void startInput()
                 }
               >
                 {running ? <Pause size={15} /> : <Play size={15} />}
-                {running ? '暂停识别' : '启动预览'}
+                {running ? '暂停识别' : inputActive ? '继续识别' : '启动预览'}
               </button>
               <button className="secondary" onClick={() => void refreshDevices()} disabled={scanning}>
                 <RefreshCw size={15} />
