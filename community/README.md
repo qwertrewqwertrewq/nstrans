@@ -1,6 +1,50 @@
 # NSTrans Community
 
-Cloudflare Worker + D1 community dictionary service for NSTrans.
+Vue 3 + Element Plus + Vue Router frontend, with Cloudflare Worker + D1 community dictionary service for NSTrans.
+
+Community model relay setup, quota semantics, server-side routing and API details:
+[MODEL_RELAY.md](./MODEL_RELAY.md). Apply all migrations through 0014 before the new Worker.
+
+## Frontend development
+
+The community frontend is independent from the React/Tauri OCR client.
+Source lives in `community/web/src`; static logos and payment QR images live in
+`community/web/public`. Vite builds into ignored `community/dist`, which is the
+Worker's asset directory. Install its separate, locked dependency tree first:
+
+```bash
+npm ci --prefix community/web --ignore-scripts
+npm run community:dev       # build frontend, run Worker on localhost:8787
+# In another terminal, for frontend HMR and proxied /api /auth:
+npm run community:web:dev   # localhost:4174
+npm run community:build     # vue-tsc + production build
+npm run community:deploy    # always rebuild before deploying Worker + assets
+```
+
+Public pages: `/`, `/how-it-works`, `/client`, `/download`, `/donate`, `/login`,
+`/client-auth-complete`. Dashboard pages are separate lazy-loaded routes:
+`/dashboard`, `/dashboard/keys`, `/dashboard/games`, `/dashboard/dictionary`,
+`/dashboard/account`, `/dashboard/updates`, `/dashboard/relay` (the last two are admin only).
+Legacy `/dashboard?view=keys` links redirect in the router, preserving other
+query parameters, including the selected game. Worker serves `index.html` for
+known page routes, so browser refresh/deep links work without swallowing API
+or binary download routes. Vue renders user-provided text without HTML injection.
+Element Plus needs inline positioning styles; CSP permits inline **styles**, not
+inline scripts or eval. Authentication and permissions remain enforced by Worker.
+
+After starting `community:dev`, run `node tools/testing/verify-community.mjs`
+with Chrome installed (or `CHROME_PATH` set). It checks all public/dashboard
+pages at desktop, tablet and phone widths; deep links, session/role guards,
+search races, keys, game creation, edits/votes, download prompts and donation
+tabs. It mocks only API responses in an isolated browser context and never
+writes production data. Screenshots are saved under ignored `.build/community-qa`.
+Worker page-routing regression tests are part of the root `npm test` suite.
+
+Dashboard mutation operations preserve existing API scoring: web edits/adds +3,
+key API edits/adds +1; identical content does not earn duplicate bonuses. Keys
+are shown once in memory, never persisted in browser storage. Downloads use the
+existing latest-release mirror routes; model sources, license notices, donation
+images, support prompt and full API examples are retained.
 
 ## Production
 
@@ -38,6 +82,13 @@ and minimum version; signing/expiry timestamps are retained for a later
 rotation policy and are not yet used to reject an otherwise valid build.
 
 After verification the official client can authenticate directly with a username and password, or start a ten-minute GitHub authorization flow in the browser. The resulting client key is returned to the application without exposing it on the web page.
+Password setup and native registration share salted PBKDF2-SHA256 hashing.
+New hashes use 100,000 iterations: the production Workers native operation
+rejects higher counts, although Node.js and local Miniflare may accept them.
+The salt and actual iteration count are stored alongside each hash and reused
+for verification. Regression tests emulate this production-only limit. This
+work factor is platform-constrained, not a claim of meeting stronger KDF
+recommendations; do not increase it without validating the deployed runtime.
 Users can register a username/password account, use the same permissions and
 API-key system as GitHub users, and bind GitHub later. Existing GitHub users can
 set a password and custom username in “账号与绑定”. This build certificate is a

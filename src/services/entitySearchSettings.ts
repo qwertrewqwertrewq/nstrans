@@ -1,6 +1,6 @@
 export type EntitySearchEngineId = 'wiki' | 'wiki-mirror' | 'brave' | 'qianfan' | 'qwen'
 export type SearchKeywordMode = 'current-game' | 'custom'
-export type RemoteModelCapability = 'multimodal-search' | 'search-only' | 'offline'
+export type RemoteModelCapability = 'multimodal-search' | 'search-only' | 'translation-only' | 'offline'
 export type RemoteModelProfile = {
   id: string
   name: string
@@ -9,6 +9,7 @@ export type RemoteModelProfile = {
   endpoint?: string
   apiKey?: string
   preset?: boolean
+  provider?: 'community'
 }
 
 const multimodalModels = ['qwen3.8-flash', 'qwen3.8-max', 'qwen3.8-max-0902', 'qwen3.8-27b', 'qwen3.8-2.4t-a95b', 'qwen3.7-flash', 'qwen3.7-plus', 'qwen3.7-max', 'qwen3.6-flash', 'qwen3.6-plus', 'qwen3.5-flash', 'qwen3.5-plus', 'qwen-plus', 'qwen-max', 'qwen3-vl-flash', 'qwen3-vl-plus', 'qwen3-vl-8b-instruct', 'qwen3-vl-30b-a3b-instruct', 'qwen3-vl-32b-instruct', 'qwen3-vl-235b-a22b-instruct'] as const
@@ -31,6 +32,7 @@ export const remoteModelPresets: RemoteModelProfile[] = [
 ]
 
 export type EntitySearchSettings = {
+  remoteProvider?: 'direct' | 'community'
   primary: EntitySearchEngineId
   fallback: EntitySearchEngineId | 'none'
   braveApiKey: string
@@ -82,10 +84,11 @@ export function loadEntitySearchSettings(): EntitySearchSettings {
     if (!stored) return defaultEntitySearchSettings
     const primary = stored.primary === 'qwen37' || stored.primary === 'qwen38' ? 'qwen' : stored.primary
     const fallback = stored.fallback === 'qwen37' || stored.fallback === 'qwen38' ? 'qwen' : stored.fallback
-    const customModels = Array.isArray(stored.remoteModels) ? stored.remoteModels.filter(validProfile).filter((item) => !item.preset) : []
+    const customModels = Array.isArray(stored.remoteModels) ? stored.remoteModels.filter(validProfile).filter((item) => !item.preset && item.provider !== 'community') : []
     const models = [...remoteModelPresets, ...customModels]
     const legacyVision = stored.visionFallbackModel === 'qwen3.7-flash' ? 'preset:qwen3.7-flash' : 'preset:qwen3.8-flash'
     return {
+      remoteProvider: stored.remoteProvider === 'community' || (stored.remoteProvider === undefined && stored.qwenProvider === 'community') ? 'community' : 'direct',
       primary: isEngine(primary) ? primary : 'wiki',
       fallback: fallback === 'none' || isEngine(fallback) ? fallback : 'none',
       braveApiKey: typeof stored.braveApiKey === 'string' ? stored.braveApiKey : '',
@@ -150,25 +153,33 @@ export const entitySearchEngineLabels: Record<EntitySearchEngineId, string> = {
   'wiki-mirror': 'wiki镜像',
   brave: 'Brave Search',
   qianfan: '百度千帆',
-  qwen: '千问远程模型',
+  qwen: '远程模型（自有 / 社区）',
 }
 
 function isEngine(value: unknown): value is EntitySearchEngineId {
   return value === 'wiki' || value === 'wiki-mirror' || value === 'brave' || value === 'qianfan' || value === 'qwen'
 }
 
-const validProfile = (value: unknown): value is RemoteModelProfile => Boolean(value && typeof value === 'object' && typeof Reflect.get(value, 'id') === 'string' && typeof Reflect.get(value, 'name') === 'string' && typeof Reflect.get(value, 'model') === 'string' && ['multimodal-search', 'search-only', 'offline'].includes(String(Reflect.get(value, 'capability'))))
+const validProfile = (value: unknown): value is RemoteModelProfile => Boolean(value && typeof value === 'object' && typeof Reflect.get(value, 'id') === 'string' && typeof Reflect.get(value, 'name') === 'string' && typeof Reflect.get(value, 'model') === 'string' && ['multimodal-search', 'search-only', 'translation-only', 'offline'].includes(String(Reflect.get(value, 'capability'))))
+export function availableRemoteModels(settings: EntitySearchSettings, purpose: 'search' | 'vision' | 'core') {
+  if (settings.remoteProvider === 'community') return [communityRelayProfile]
+  return settings.remoteModels.filter(item => item.provider !== 'community'
+    && (purpose === 'vision' ? item.capability === 'multimodal-search' : purpose === 'search' ? ['multimodal-search','search-only'].includes(item.capability) : item.capability !== 'offline'))
+}
 export function remoteModel(settings: EntitySearchSettings, purpose: 'search' | 'vision' | 'core') {
+  if (settings.remoteProvider === 'community') return communityRelayProfile
   const id = purpose === 'vision' ? settings.visionModelId : purpose === 'core' ? settings.coreModelId : settings.searchModelId
-  return settings.remoteModels.find((item) => item.id === id && (purpose === 'vision' ? item.capability === 'multimodal-search' : item.capability !== 'offline'))
+  return availableRemoteModels(settings, purpose).find((item) => item.id === id)
 }
 export function remoteModelCredentials(settings: EntitySearchSettings, purpose: 'search' | 'vision' | 'core') {
   const profile = remoteModel(settings, purpose)
   return profile
     ? {
         ...profile,
-        apiKey: profile.apiKey?.trim() || settings.qwenApiKey.trim(),
-        endpoint: profile.endpoint?.trim() || settings.qwenEndpoint.trim(),
+        apiKey: profile.provider === 'community' ? loadCommunityApiKey().trim() : profile.apiKey?.trim() || settings.qwenApiKey.trim(),
+        endpoint: profile.provider === 'community' ? 'https://nstrans.221129.xyz/api/v1/relay' : profile.endpoint?.trim() || settings.qwenEndpoint.trim(),
       }
     : undefined
 }
+import { loadCommunityApiKey } from './knowledgeSharing'
+export const communityRelayProfile: RemoteModelProfile = { id: 'community:relay', model: 'community-relay', name: '社区中转模型', capability: 'multimodal-search', provider: 'community' }

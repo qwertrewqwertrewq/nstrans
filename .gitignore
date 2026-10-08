@@ -23,6 +23,7 @@ dist-ssr
 
 # Local secrets and developer configuration
 .env
+.secret
 .env.*
 !.env.example
 

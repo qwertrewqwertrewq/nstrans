@@ -17,7 +17,8 @@ import { PresentationToolbar } from './components/PresentationToolbar'
 import { SelectionOverlay } from './components/SelectionOverlay'
 import { offsetTextRegions, selectionCanvasRect, type NormalizedSelection } from './services/presentationGeometry'
 import type { LatencySample, MachineTranslationProvider, OcrSettings, OverlaySettings, TextRegion, TranslationEngineId, TranslationRoutingSettings } from './types'
-import { DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, entitySearchEngineLabels, loadEntitySearchSettings, remoteModelCredentials, resolveSearchKeywords, saveEntitySearchSettings, type EntitySearchEngineId } from './services/entitySearchSettings'
+import { DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, DEFAULT_TRADITIONAL_SEARCH_TEMPLATE, availableRemoteModels, entitySearchEngineLabels, loadEntitySearchSettings, remoteModelCredentials, resolveSearchKeywords, saveEntitySearchSettings, type EntitySearchEngineId } from './services/entitySearchSettings'
+import { CommunitySearchAttribution } from './components/CommunityModelAccess'
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { clearDiagnosticLog, diagnosticLogEntries, subscribeDiagnosticLog, writeDiagnosticLog, type DiagnosticLogEntry } from './services/diagnosticLog'
@@ -1743,6 +1744,7 @@ function App() {
                 </span>
               }
             >
+              {routing.entitySearch.remoteProvider === 'community' && <CommunitySearchAttribution />}
               <TerminologyInspector
                 sentences={regions.map((region) => ({
                   id: region.id,
@@ -1886,21 +1888,20 @@ function App() {
               </div>
               {routing.coreTranslationEngine === 'remote' && (
                 <div className="remote-core-model">
-                  <div className="inline-select">
+                  {routing.entitySearch.remoteProvider === 'community' ? <div className="notice">社区中转模型 · 按用途自动路由</div> : <div className="inline-select">
                     <label>远程核心翻译模型</label>
                     <div className="select-wrap">
                       <select value={routing.entitySearch.coreModelId} onChange={(event) => updateEntitySearch({ coreModelId: event.target.value })}>
-                        {routing.entitySearch.remoteModels
-                          .filter(({ capability }) => capability !== 'offline')
+                        {availableRemoteModels(routing.entitySearch, 'core')
                           .map((model) => (
                             <option value={model.id} key={model.id}>
-                              {model.name} · {model.capability === 'multimodal-search' ? '多模态 + 搜索' : '仅搜索'}
+                              {model.name} · {model.capability === 'multimodal-search' ? '多模态 + 搜索' : model.capability === 'translation-only' ? '仅翻译' : '文本 + 搜索'}
                             </option>
                           ))}
                       </select>
                       <ChevronDown size={13} />
                     </div>
-                  </div>
+                  </div>}
                   <div className="engine-status"><EngineState label={`远程 LLM · ${remoteModelCredentials(routing.entitySearch, 'core')?.name ?? '未选择模型'}`} ready={Boolean(remoteModelCredentials(routing.entitySearch, 'core')?.apiKey)} /></div>
                 </div>
               )}
@@ -2088,7 +2089,7 @@ function App() {
                         autoComplete="off"
                       />
                     )}
-                    {(routing.entitySearch.primary === 'qwen' || routing.entitySearch.fallback === 'qwen' || routing.entitySearch.visionFallbackEnabled) && <input type="password" value={routing.entitySearch.qwenApiKey ?? ''} onChange={(event) => updateEntitySearch({ qwenApiKey: event.target.value })} placeholder="阿里百炼（千问）DashScope API Key" aria-label="Qwen API Key" autoComplete="off" />}
+                    {routing.entitySearch.remoteProvider !== 'community' && (routing.entitySearch.primary === 'qwen' || routing.entitySearch.fallback === 'qwen' || routing.entitySearch.visionFallbackEnabled) && <input type="password" value={routing.entitySearch.qwenApiKey ?? ''} onChange={(event) => updateEntitySearch({ qwenApiKey: event.target.value })} placeholder="阿里百炼（千问）DashScope API Key" aria-label="Qwen API Key" autoComplete="off" />}
                     <div className="toggle-row">
                       <div>
                         <strong>远程视觉识别</strong>
@@ -2106,7 +2107,7 @@ function App() {
                         <span />
                       </button>
                     </div>
-                    {routing.entitySearch.visionFallbackEnabled && (
+                    {routing.entitySearch.visionFallbackEnabled && (routing.entitySearch.remoteProvider === 'community' ? <div className="notice">社区中转模型 · 视觉识别</div> :
                       <div className="inline-select">
                         <label>远程视觉模型</label>
                         <div className="select-wrap">
@@ -2118,8 +2119,7 @@ function App() {
                               })
                             }
                           >
-                            <option value="preset:qwen3.8-flash">Qwen 3.8 Flash（多模态·推荐）</option>
-                            <option value="preset:qwen3.7-flash">Qwen 3.7 Flash（多模态）</option>
+                            {availableRemoteModels(routing.entitySearch, 'vision').map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
                           </select>
                           <ChevronDown size={13} />
                         </div>
@@ -2287,7 +2287,7 @@ function App() {
                 <label>百度千帆 API Key</label>
                 <input type="password" value={routing.entitySearch.qianfanApiKey} onChange={(event) => updateEntitySearch({ qianfanApiKey: event.target.value })} placeholder="用于百度千帆名词查询（可选）" aria-label="百度千帆 API Key" autoComplete="off" />
               </div>
-              <RemoteModelManager settings={routing.entitySearch} onChange={updateEntitySearch} mode="credentials" />
+              <RemoteModelManager settings={routing.entitySearch} onChange={updateEntitySearch} mode="credentials" communityApiKey={communityApiKey} />
               <small className="muted">社区账号登录成功后会自动签发并保存设备密钥，不会显示或要求复制。其他 API Key 与自定义端点仍只保存在当前设备。</small>
             </ControlPanel>
           )}

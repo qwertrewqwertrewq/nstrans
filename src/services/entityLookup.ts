@@ -312,7 +312,7 @@ function searchEngineLabel(engine: EntitySearchEngineId) {
       'wiki-mirror': 'wiki镜像',
       brave: 'Brave Search',
       qianfan: '百度千帆',
-      qwen: '千问远程模型',
+      qwen: '远程模型（自有 / 社区）',
     } as const
   )[engine]
 }

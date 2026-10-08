@@ -1,16 +1,19 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 import type { EntitySearchSettings, RemoteModelCapability, RemoteModelProfile } from '../services/entitySearchSettings'
+import { availableRemoteModels } from '../services/entitySearchSettings'
+import { CommunityModelAccess } from './CommunityModelAccess'
 
 const capabilityLabels: Record<RemoteModelCapability, string> = {
   'multimodal-search': '多模态 + 搜索',
   'search-only': '仅搜索',
+  'translation-only': '仅翻译',
   offline: '离线模型（未来）',
 }
 
 type RemoteModelManagerMode = 'full' | 'models' | 'credentials'
 
-export function RemoteModelManager({ settings, onChange, mode = 'full' }: { settings: EntitySearchSettings; onChange(next: Partial<EntitySearchSettings>): void; mode?: RemoteModelManagerMode }) {
+export function RemoteModelManager({ settings, onChange, mode = 'full', communityApiKey = '' }: { settings: EntitySearchSettings; onChange(next: Partial<EntitySearchSettings>): void; mode?: RemoteModelManagerMode; communityApiKey?: string }) {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState({
     name: '',
@@ -19,8 +22,8 @@ export function RemoteModelManager({ settings, onChange, mode = 'full' }: { sett
     apiKey: '',
     capability: 'multimodal-search' as RemoteModelCapability,
   })
-  const searchModels = useMemo(() => settings.remoteModels.filter(({ capability }) => capability !== 'offline'), [settings.remoteModels])
-  const visionModels = useMemo(() => settings.remoteModels.filter(({ capability }) => capability === 'multimodal-search'), [settings.remoteModels])
+  const searchModels = useMemo(() => availableRemoteModels(settings, 'search'), [settings])
+  const visionModels = useMemo(() => availableRemoteModels(settings, 'vision'), [settings])
   const showCredentials = mode !== 'models'
   const showModels = mode !== 'credentials'
   const addModel = () => {
@@ -56,13 +59,15 @@ export function RemoteModelManager({ settings, onChange, mode = 'full' }: { sett
   }
   return (
     <div className="remote-model-manager">
-      {showCredentials && <div className="remote-defaults">
+      {showCredentials && <CommunityModelAccess settings={settings} onChange={onChange} apiKey={communityApiKey} />}
+      {showCredentials && settings.remoteProvider !== 'community' && <div className="remote-defaults">
         <label>阿里百炼（千问）通用 API Key</label>
         <input type="password" value={settings.qwenApiKey} onChange={(event) => onChange({ qwenApiKey: event.target.value })} placeholder="DashScope API Key" autoComplete="off" />
         <label>自定义 API 端点（可选）</label>
         <input type="url" value={settings.qwenEndpoint} onChange={(event) => onChange({ qwenEndpoint: event.target.value })} placeholder="留空使用 DashScope 默认端点" />
       </div>}
-      {showModels && <><div className="inline-select">
+      {showModels && settings.remoteProvider === 'community' && <div className="notice">社区中转模型 · 服务器自动选择翻译、搜索及视觉识别模型。</div>}
+      {showModels && settings.remoteProvider !== 'community' && <><div className="inline-select">
         <label>术语搜索模型</label>
         <div className="select-wrap">
           <select value={settings.searchModelId} onChange={(event) => onChange({ searchModelId: event.target.value })}>
@@ -126,10 +131,10 @@ export function RemoteModelManager({ settings, onChange, mode = 'full' }: { sett
           </button>
         </div>
       )}
-      {settings.remoteModels.some((item) => !item.preset) && (
+      {settings.remoteModels.some((item) => !item.preset && item.provider !== 'community') && (
         <div className="custom-model-list">
           {settings.remoteModels
-            .filter((item) => !item.preset)
+            .filter((item) => !item.preset && item.provider !== 'community')
             .map((item) => (
               <div key={item.id}>
                 <span>
@@ -145,12 +150,12 @@ export function RemoteModelManager({ settings, onChange, mode = 'full' }: { sett
             ))}
         </div>
       )}
-      <small className="muted">多模态 + 搜索模型可同时用于术语查询和远程视觉识别；仅搜索模型不会接收截图；离线模型当前只保存配置，不参与自动路由。核心翻译模型请在“翻译与词库”中选择。</small>
+      <small className="muted">多模态 + 搜索可用于术语查询及视觉识别；文本 + 搜索不接收截图；仅翻译不参与搜索；离线模型只保存配置。核心翻译模型请在“翻译与词库”中选择。</small>
       </>}
-      {mode === 'credentials' && settings.remoteModels.some((item) => !item.preset) && (
+      {mode === 'credentials' && settings.remoteProvider !== 'community' && settings.remoteModels.some((item) => !item.preset && item.provider !== 'community') && (
         <div className="custom-model-credentials">
           <label>自定义模型凭据覆盖</label>
-          {settings.remoteModels.filter((item) => !item.preset).map((item) => (
+          {settings.remoteModels.filter((item) => !item.preset && item.provider !== 'community').map((item) => (
             <div key={item.id}>
               <strong>{item.name}</strong>
               <input type="url" value={item.endpoint ?? ''} onChange={(event) => onChange({ remoteModels: settings.remoteModels.map((model) => model.id === item.id ? { ...model, endpoint: event.target.value } : model) })} placeholder="继承通用 API 端点" />

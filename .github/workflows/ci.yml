@@ -27,7 +27,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           package-manager-cache: false
 
       - name: Install dependencies
@@ -41,3 +41,18 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+  community:
+    name: Community Vue frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Install community dependencies
+        run: npm ci --prefix community/web --ignore-scripts
+      - name: Typecheck and build community
+        run: npm run community:build

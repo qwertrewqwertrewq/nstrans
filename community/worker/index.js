@@ -1,4 +1,5 @@
 import { proxyWikiMirror } from './wiki-mirror.js'
+import { adminProxy, proxyCatalog, relayModel, recoverProxyReservations } from './model-relay.js'
 
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' }
 const encoder = new TextEncoder()
@@ -60,6 +61,7 @@ export default {
   },
   async scheduled(_controller, env, context) {
     context.waitUntil(syncLatestRelease(env))
+    context.waitUntil(recoverProxyReservations(env))
   },
 }
 
@@ -75,6 +77,16 @@ async function route(request, env) {
   if (path === '/api/v1/auth/client/login' && request.method === 'POST') return cors(await nativeClientLogin(request, env))
   if (path === '/api/v1/auth/client/register' && request.method === 'POST') return cors(await nativeClientRegister(request, env))
   if (path === '/api/v1/client-update' && request.method === 'GET') return cors(await clientUpdatePolicy(request, env))
+  if ((path === '/api/v1/relay/catalog' && request.method === 'GET') || (path === '/api/v1/relay' && request.method === 'POST')) {
+    const auth = await apiKeyUser(request, env)
+    if (auth.response) return cors(auth.response)
+    return cors(path.endsWith('/catalog') ? await proxyCatalog(env, auth.user) : await relayModel(request, env, auth.user))
+  }
+  if (/^\/api\/admin\/relay\/(?:config|users|usage|grants|credentials|discover)$/u.test(path)) {
+    const auth = await requireUser(request, env, true)
+    if (auth.response) return auth.response
+    return adminProxy(request, env, auth.user)
+  }
   if (path === '/api/v1/wiki-mirror' && request.method === 'POST') {
     const auth = await apiKeyUser(request, env)
     if (auth.response) return cors(auth.response)
@@ -117,8 +129,18 @@ async function route(request, env) {
   if (path.startsWith('/download/model/')) return downloadModel(request, path.slice('/download/model/'.length))
   if (path === '/download/model-notice') return modelNotice()
   if (path === '/client-login' || path === '/client-login.html' || path === '/client-login.js') return new Response('Not Found', { status: 404 })
-  if (path === '/' || path === '/dashboard' || path === '/how-it-works' || path === '/client' || path === '/download' || path === '/donate' || path === '/client-auth-complete') return servePage(request, env)
-  return secureAsset(await env.ASSETS.fetch(request))
+  if (isCommunityPage(path)) {
+    if (!['GET', 'HEAD'].includes(request.method)) return new Response('Method Not Allowed', { status: 405 })
+    return servePage(request, env)
+  }
+  // Never turn unknown API requests into HTML, even when the asset service
+  // changes its fallback defaults. Public APIs keep their JSON/CORS contract.
+  if (path.startsWith('/api/')) return cors(json({ error: '接口不存在' }, 404))
+  const asset = await env.ASSETS.fetch(request)
+  if (asset.status === 404 && ['GET', 'HEAD'].includes(request.method)
+    && request.headers.get('accept')?.includes('text/html')
+    && !path.startsWith('/auth/') && !/\/[^/]*\.[^/]*$/u.test(path)) return servePage(request, env, 404)
+  return secureAsset(asset)
 }
 
 async function downloadModel(request, platform) {
@@ -445,7 +467,8 @@ async function updateAccountProfile(request, env) {
 
 async function updateAccountPassword(request, env) {
   const auth = await requireUser(request, env); if (auth.response) return auth.response
-  const password = String((await readJson(request)).password || '')
+  const body = await readJson(request)
+  const password = typeof body.password === 'string' ? body.password : ''
   if (password.length < 10 || password.length > 128) return json({ error: '密码长度需为 10–128 个字符' }, 400)
   const data = await hashPassword(password)
   await env.DB.prepare('UPDATE users SET password_hash=?,password_salt=?,password_iterations=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(data.hash, data.salt, data.iterations, auth.user.id).run()
@@ -458,12 +481,17 @@ function validateCredentials(username, password) {
   return ''
 }
 function validUsername(value) { return /^[\p{L}\p{N}_-]{3,32}$/u.test(value) }
-async function hashPassword(password, salt = randomToken(16), iterations = 180000) {
+// Production Workers cap a single native PBKDF2 operation at 100,000
+// iterations, even though Node.js / local Miniflare may accept higher values.
+// Store the actual count with each salted hash; never clamp existing records
+// during verification, which would silently change the password derivation.
+// Shared by account password setup and official-client registration/login.
+export async function hashPassword(password, salt = randomToken(16), iterations = 100000) {
   const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: encoder.encode(salt), iterations }, key, 256)
   return { hash: bytesBase64url(new Uint8Array(bits)), salt, iterations }
 }
-async function verifyPassword(password, user) { const result = await hashPassword(password, user.password_salt, user.password_iterations); return safeEqual(result.hash, user.password_hash) }
+export async function verifyPassword(password, user) { const result = await hashPassword(password, user.password_salt, user.password_iterations); return safeEqual(result.hash, user.password_hash) }
 function base64urlBytes(value) { const base64 = value.replace(/-/gu, '+').replace(/_/gu, '/').padEnd(Math.ceil(value.length / 4) * 4, '='); return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0)) }
 function bytesBase64url(bytes) { return btoa(String.fromCharCode(...bytes)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/gu, '') }
 function compareVersions(left, right) { const a = left.split(/[.+-]/u).slice(0, 3).map(Number), b = right.split(/[.+-]/u).slice(0, 3).map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0); return 0 }
@@ -832,11 +860,23 @@ function groupTerms(rows) {
   return [...map.values()]
 }
 
-async function servePage(request, env) { return secureAsset(await env.ASSETS.fetch(request)) }
+export function isCommunityPage(path) {
+  if (path.length > 1) path = path.replace(/\/$/u, '')
+  return ['/', '/dashboard', '/how-it-works', '/client', '/download', '/donate', '/login', '/client-auth-complete'].includes(path)
+    || /^\/dashboard\/(?:keys|games|dictionary|account|updates|relay)\/?$/u.test(path)
+}
+async function servePage(request, env, status = 200) {
+  const url = new URL(request.url); url.pathname = '/index.html'; url.search = ''
+  const asset = await env.ASSETS.fetch(new Request(url, { method: request.method }))
+  const response = secureAsset(status === 404 && asset.ok ? new Response(asset.body, { status: 404, headers: asset.headers }) : asset)
+  // Fresh entry HTML prevents a stale document referencing removed hashed chunks.
+  response.headers.set('cache-control', 'no-cache')
+  return response
+}
 function secureAsset(response) {
   const next = new Response(response.body, response)
   next.headers.set('x-content-type-options', 'nosniff'); next.headers.set('referrer-policy', 'strict-origin-when-cross-origin')
-  next.headers.set('content-security-policy', "default-src 'self'; img-src 'self' https: data:; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com")
+  next.headers.set('content-security-policy', "default-src 'self'; img-src 'self' https: data:; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com")
   return next
 }
 function cors(response) { response.headers.set('access-control-allow-origin', '*'); response.headers.set('access-control-allow-headers', 'authorization,content-type'); response.headers.set('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS'); return response }

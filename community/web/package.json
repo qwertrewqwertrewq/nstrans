@@ -1,0 +1,26 @@
+{
+  "name": "nstrans-community-web",
+  "version": "1.0.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4174",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4174",
+    "format": "prettier --write src vite.config.ts index.html"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "element-plus": "^2.11.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.2",
+    "unplugin-vue-components": "^30.0.0",
+    "vite": "^8.2.2",
+    "vue-tsc": "^3.1.0"
+  }
+}

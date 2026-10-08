@@ -8,8 +8,9 @@
     { "pattern": "nstrans.221129.xyz", "custom_domain": true }
   ],
   "assets": {
-    "directory": "public",
+    "directory": "dist",
     "binding": "ASSETS",
+    "not_found_handling": "none",
     "run_worker_first": true
   },
   "d1_databases": [

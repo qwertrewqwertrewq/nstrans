@@ -3,6 +3,7 @@ import type { GameId } from '../gameAdapters/types'
 import { DEFAULT_LLM_SEARCH_PROMPT_TEMPLATE, renderSearchTemplate, type RemoteModelCapability } from './entitySearchSettings'
 import { containsJapaneseKana } from './translationQuality'
 import { writeDiagnosticLog } from './diagnosticLog'
+import { setCommunityGrounding, type CommunityGrounding } from './communityGrounding'
 
 type QwenResponse = { content: string }
 export type QwenDictionaryEntry = {
@@ -17,9 +18,22 @@ export type QwenVisionResult = {
 }
 
 async function requestQwen(model: string, apiKey: string, prompt: string, imageDataUrl?: string, enableSearch = false, endpoint = '', capability: RemoteModelCapability = 'multimodal-search') {
-  if (!apiKey.trim()) throw new Error('Qwen API Key 为空')
+  if (!apiKey.trim()) throw new Error(endpoint === 'https://nstrans.221129.xyz/api/v1/relay' ? '请先登录社区账号' : '远程模型 API Key 为空')
   if (capability === 'offline') throw new Error('离线远程模型路由尚未实现')
   if (imageDataUrl && capability !== 'multimodal-search') throw new Error('所选模型不支持视觉输入')
+  if (enableSearch && capability === 'translation-only') throw new Error('所选模型仅支持翻译')
+  if (endpoint === 'https://nstrans.221129.xyz/api/v1/relay') {
+    const response = await fetch(endpoint, {
+      method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(130000),
+      body: JSON.stringify({ purpose: imageDataUrl ? 'vision' : enableSearch ? 'search' : 'translation', prompt, imageDataUrl, requestId: crypto.randomUUID() }),
+    })
+    const body = await response.json() as QwenResponse & { error?: string; quota?: { balance: number }; cost?: number; grounding?: CommunityGrounding }
+    if (!response.ok || !body.content) throw new Error(body.error || '社区中转模型没有返回结果')
+    window.dispatchEvent(new CustomEvent('nstrans-community-quota', { detail: body.quota }))
+    if (enableSearch) setCommunityGrounding(body.grounding)
+    writeDiagnosticLog('LLM', '社区中转模型响应', `${body.cost ?? 0} 点 · 剩余 ${body.quota?.balance ?? 0} 点`, 'success')
+    return body.content
+  }
   const request = {
     model,
     apiKey,
@@ -61,7 +75,7 @@ function parseJsonObject(text: string): Record<string, unknown> {
     .replace(/\s*```$/u, '')
   const start = cleaned.indexOf('{'),
     end = cleaned.lastIndexOf('}')
-  if (start < 0 || end <= start) throw new Error('Qwen 未返回 JSON 对象')
+  if (start < 0 || end <= start) throw new Error('远程模型未返回 JSON 对象')
   return JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>
 }
 
@@ -117,7 +131,7 @@ export async function qwenVisionFallback(input: { observedText: string; candidat
   const { observedText, candidates, imageDataUrl, gameNames, apiKey, model } = input
   const prompt = `你是游戏画面 OCR 纠错与日中翻译器。图像仅是 OCR 文本区域的局部截图。\n游戏：${gameNames.join(' / ') || input.gameId}\n本地 OCR 原文：${observedText}\n未查到的片假名候选：${candidates.join('、')}\n任务：结合图像和游戏信息纠正 OCR，再把画面中的完整日文直接翻成简体中文。提取可复用的专有名词或短词；若 OCR 错字与正确日文不同，同时返回错误写法映射。例如 世儿夕→ゼルダ→塞尔达。\n只输出 JSON：{"correctedText":"纠正后的完整日文","translation":"直接简短译文","entries":[{"observed":"本地OCR写法","canonical":"正确日文词","target":"简体中文词"}]}。entries 只能包含独立短词或专名，禁止整段对白、标点和解释；无法确认则返回空 entries。`
   const startedAt = performance.now()
-  writeDiagnosticLog('OCR', '启动远程视觉识别', `${model} · ${candidates.join('、')}`, 'warning')
+  writeDiagnosticLog('OCR', '启动远程视觉识别', `${input.endpoint === 'https://nstrans.221129.xyz/api/v1/relay' ? '社区中转模型' : model} · ${candidates.join('、')}`, 'warning')
   const result = parseQwenVisionResponse(await requestQwen(model, apiKey, prompt, imageDataUrl, false, input.endpoint, input.capability), observedText)
   if (!result) return undefined
   writeDiagnosticLog('LLM', '远程视觉识别响应', `${Math.round(performance.now() - startedAt)} ms · 学习 ${result.entries.length} 条`, 'success')
