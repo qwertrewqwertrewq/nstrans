@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, resolve } from 'node:path'
+import { clientBuildEnvironment } from './client-build-env.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const cli = resolve(root, 'node_modules/@tauri-apps/cli/tauri.js')
@@ -20,7 +21,7 @@ const path = existsSync(rustupBin)
   : process.env.PATH
 const result = spawnSync(process.execPath, [cli, 'android', ...process.argv.slice(2)], {
   cwd: root,
-  env: { ...process.env, ANDROID_HOME: sdk, NDK_HOME: ndk, JAVA_HOME: java, PATH: path },
+  env: { ...clientBuildEnvironment(), ANDROID_HOME: sdk, NDK_HOME: ndk, JAVA_HOME: java, PATH: path },
   stdio: 'inherit',
 })
 

@@ -176,9 +176,11 @@ jobs:
           mkdir -p release-assets
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant with-llama)"
           npm run ios:build:with-llama
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/apple/build/arm64/NSTrans.ipa ipados with-llama
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-arm64-unsigned-WithLlama.ipa"
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant remote-only)"
           npm run ios:build:remote
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/apple/build/arm64/NSTrans.ipa ipados remote-only
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa "release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-arm64-unsigned-RemoteOnly.ipa"
           cd release-assets
           for file in *.ipa; do shasum -a 256 "$file" > "$file.sha256"; done
@@ -236,9 +238,11 @@ jobs:
           mkdir -p release-assets
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant with-llama)"
           npm run android:build:with-llama
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk android with-llama
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk"
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant remote-only)"
           npm run android:build:remote
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk android remote-only
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-RemoteOnly.apk"
           with_apk="release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk"
           remote_apk="release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-RemoteOnly.apk"

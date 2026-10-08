@@ -91,6 +91,7 @@ jobs:
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant with-llama)"
           npm run ios:build:with-llama
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/apple/build/arm64/NSTrans.ipa ipados with-llama
           mkdir -p artifacts/WithLlama
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa artifacts/WithLlama/NSTrans-iPadOS-arm64-unsigned-WithLlama.ipa
       - name: Build RemoteOnly unsigned IPA
@@ -99,6 +100,7 @@ jobs:
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform ipados --variant remote-only)"
           npm run ios:build:remote
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/apple/build/arm64/NSTrans.ipa ipados remote-only
           mkdir -p artifacts/RemoteOnly
           cp src-tauri/gen/apple/build/arm64/NSTrans.ipa artifacts/RemoteOnly/NSTrans-iPadOS-arm64-unsigned-RemoteOnly.ipa
       - uses: actions/upload-artifact@v4
@@ -146,6 +148,7 @@ jobs:
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant with-llama)"
           npm run android:build:with-llama
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk android with-llama
           mkdir -p artifacts/WithLlama
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/WithLlama/NSTrans-Android-arm64-debug-WithLlama.apk
       - name: Build RemoteOnly APK
@@ -154,6 +157,7 @@ jobs:
         run: |
           export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform android --variant remote-only)"
           npm run android:build:remote
+          node scripts/verify-mobile-attestation.mjs src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk android remote-only
           mkdir -p artifacts/RemoteOnly
           cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk artifacts/RemoteOnly/NSTrans-Android-arm64-debug-RemoteOnly.apk
       - name: Verify Android variants

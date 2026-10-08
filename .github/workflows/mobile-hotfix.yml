@@ -1,0 +1,109 @@
+name: Repair mobile release credentials
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release to overwrite (version must match source)
+        required: true
+        default: v1.0.2
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-hotfix-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  CLIENT_BUILD_KEY_ID: nstrans-release-2026-01
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: |
+          npm ci --ignore-scripts
+          test "v$(node -p 'require("./package.json").version')" = "$RELEASE_TAG"
+          npm test
+          npm run build
+      - name: Require existing published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false
+
+  mobile:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ipados
+            runner: macos-15
+          - platform: android
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: actions/setup-java@v5
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Rust and Android SDK
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          if [[ '${{ matrix.platform }}' == ipados ]]; then
+            rustup target add aarch64-apple-ios
+          else
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.0.12077973'
+            echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+            rustup target add aarch64-linux-android
+          fi
+      - run: npm ci --ignore-scripts
+      - name: Build and verify BOTH native variants before overwriting
+        env:
+          CLIENT_BUILD_SIGNING_KEY: ${{ secrets.CLIENT_BUILD_SIGNING_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for variant in with-llama remote-only; do
+            export NSTRANS_BUILD_ATTESTATION="$(node scripts/sign-client-build.mjs --platform '${{ matrix.platform }}' --variant "$variant")"
+            if [[ "$variant" == with-llama ]]; then label=WithLlama; suffix=with-llama; else label=RemoteOnly; suffix=remote; fi
+            if [[ '${{ matrix.platform }}' == ipados ]]; then
+              npm run "ios:build:$suffix"
+              source=src-tauri/gen/apple/build/arm64/NSTrans.ipa
+              target="release-assets/NSTrans-${RELEASE_TAG#v}-iPadOS-arm64-unsigned-$label.ipa"
+            else
+              npm run "android:build:$suffix"
+              source=src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+              target="release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-$label.apk"
+            fi
+            cp "$source" "$target"
+            node scripts/verify-mobile-attestation.mjs "$target" '${{ matrix.platform }}' "$variant"
+          done
+          cd release-assets
+          for file in *.ipa *.apk; do
+            [[ -f "$file" ]] || continue
+            shasum -a 256 "$file" > "$file.sha256"
+          done
+      - name: Overwrite only mobile release assets and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber

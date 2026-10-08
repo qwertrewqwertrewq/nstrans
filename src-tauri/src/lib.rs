@@ -71,7 +71,9 @@ struct ClientBuildAttestation {
 
 #[tauri::command]
 fn client_build_attestation() -> ClientBuildAttestation {
-  let attestation = option_env!("NSTRANS_BUILD_ATTESTATION").filter(|value| !value.is_empty());
+  let attestation = option_env!("TAURI_NSTRANS_BUILD_ATTESTATION")
+    .filter(|value| !value.is_empty())
+    .or_else(|| option_env!("NSTRANS_BUILD_ATTESTATION").filter(|value| !value.is_empty()));
   ClientBuildAttestation { available: attestation.is_some(), version: env!("CARGO_PKG_VERSION"), attestation }
 }
 
