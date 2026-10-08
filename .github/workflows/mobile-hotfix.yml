@@ -98,6 +98,11 @@ jobs:
             cp "$source" "$target"
             node scripts/verify-mobile-attestation.mjs "$target" '${{ matrix.platform }}' "$variant"
           done
+          if [[ '${{ matrix.platform }}' == android ]]; then
+            with_size=$(unzip -p "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-WithLlama.apk" lib/arm64-v8a/libnstrans_lib.so | wc -c)
+            remote_size=$(unzip -p "release-assets/NSTrans-${RELEASE_TAG#v}-Android-arm64-debug-RemoteOnly.apk" lib/arm64-v8a/libnstrans_lib.so | wc -c)
+            test "$with_size" -gt $((remote_size + 1048576)) || { echo 'Android variants contain the same native runtime' >&2; exit 1; }
+          fi
           cd release-assets
           for file in *.ipa *.apk; do
             [[ -f "$file" ]] || continue
