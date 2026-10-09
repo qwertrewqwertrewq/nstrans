@@ -19,17 +19,18 @@ const captureTokens = (label: string) => label
  * deliberately refuses to fall back to the built-in/default microphone.
  */
 export function findCaptureAudioDevice(video: CaptureDeviceDescriptor, audioDevices: readonly CaptureDeviceDescriptor[]) {
+  const inputs = audioDevices.filter((device) => device.deviceId !== 'default' && device.deviceId !== 'communications')
   if (video.groupId) {
-    const grouped = audioDevices.find((device) => device.groupId && device.groupId === video.groupId)
+    const grouped = inputs.find((device) => device.groupId && device.groupId === video.groupId)
     if (grouped) return grouped
   }
   const videoTokens = new Set(captureTokens(video.label))
-  const tokenMatch = audioDevices
+  const tokenMatch = inputs
     .map((device) => ({ device, score: captureTokens(device.label).filter((token) => videoTokens.has(token)).length }))
     .filter(({ score }) => score > 0)
     .sort((left, right) => right.score - left.score)[0]?.device
   if (tokenMatch) return tokenMatch
-  const external = audioDevices.filter((device) => /(?:usb|hdmi|capture|采集卡|数字音频|digital audio)/iu.test(device.label))
+  const external = inputs.filter((device) => /(?:usb|hdmi|capture|采集卡|数字音频|digital audio)/iu.test(device.label))
   return external.length === 1 ? external[0] : undefined
 }
 
