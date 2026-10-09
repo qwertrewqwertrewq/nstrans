@@ -646,6 +646,14 @@ function App() {
         return
       }
       audioStreamRef.current = nextAudio
+      const audioTrack = nextAudio.getAudioTracks()[0]
+      if (!audioTrack || audioTrack.readyState === 'ended') throw new Error('所选设备没有可用的音频轨道')
+      audioTrack.addEventListener('ended', () => {
+        if (request !== audioRequestRef.current) return
+        stopCaptureAudio()
+        setCaptureAudioStatus('采集卡音频已断开，请重新开启音频或选择设备')
+        writeDiagnosticLog('音频', '采集卡音频已断开', selected.label, 'warning')
+      }, { once: true })
       setAudioStream(nextAudio)
       setAudioDeviceId(selected.deviceId)
       if (audioRef.current) {

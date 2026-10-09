@@ -40,6 +40,29 @@ describe('media capture constraints', () => {
 })
 
 describe('capture-card audio pairing', () => {
+  it('ignores default and communications aliases when matching a media-device group', () => {
+    const video = { deviceId: 'capture-video', groupId: 'usb-card', label: 'Hagibis' }
+    const audio = [
+      { deviceId: 'default', groupId: 'usb-card', label: 'Default - Hagibis' },
+      { deviceId: 'communications', groupId: 'usb-card', label: 'Communications - Hagibis' },
+      { deviceId: 'capture-audio', groupId: 'usb-card', label: 'Hagibis' },
+    ]
+    expect(findCaptureAudioDevice(video, audio)?.deviceId).toBe('capture-audio')
+  })
+
+  it('ignores system aliases when matching device labels', () => {
+    expect(findCaptureAudioDevice({ deviceId: 'capture-video', label: 'Hagibis' }, [
+      { deviceId: 'default', label: 'Default - Hagibis' },
+      { deviceId: 'capture-audio', label: 'Hagibis' },
+    ])?.deviceId).toBe('capture-audio')
+  })
+
+  it('does not use a system alias as the only external audio source', () => {
+    expect(findCaptureAudioDevice({ deviceId: 'capture-video', label: 'USB Video' }, [
+      { deviceId: 'default', label: 'Default - USB Audio' },
+    ])).toBeUndefined()
+  })
+
   it('prefers an audio endpoint in the same media-device group', () => {
     const audio = [
       { deviceId: 'mic', groupId: 'builtin', label: 'MacBook Microphone' },
